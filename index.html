@@ -350,6 +350,7 @@
       let camera1, camera2;
       let player1Tank, player2Tank;
       let selectionRenderers = [];
+      let messageTimeout;
 
       const keys = {};
       const gameObjects = {
@@ -505,7 +506,7 @@
             .multiplyScalar(Math.random() * (isDust ? 5 : 20) * scale);
           particle.lifespan = Math.random() * 0.6 + 0.2;
           gameObjects.particles.push(particle);
-          scene.add(particle);
+          if (scene) scene.add(particle);
         }
       }
 
@@ -851,6 +852,7 @@
               gameState.players[1].tankType = tankType;
               gameState.selectionComplete = true;
               document.getElementById("start-screen").style.display = "none";
+              selectionRenderers.forEach((r) => r.renderer.dispose());
               selectionRenderers = [];
               initGame();
             }
@@ -958,7 +960,6 @@
           keys[e.code] = true;
         });
         document.addEventListener("keyup", (e) => {
-          keys[e.code] = false;
           if (!gameState.gameStarted) return;
           for (let i = 0; i < 2; i++) {
             if (e.code === CONTROLS[i].reload) startReload(i);
@@ -995,7 +996,6 @@
         });
       }
 
-      // --- PRZYWRÓCONA I ULEPSZONA FUNKCJA TWORZENIA SCENERII ---
       function createScenery() {
         const ground = new THREE.Mesh(
           new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE),
@@ -1003,7 +1003,6 @@
         );
         ground.rotation.x = -Math.PI / 2;
         scene.add(ground);
-
         const waterGeometry = new THREE.PlaneGeometry(
           MAP_SIZE * 5,
           MAP_SIZE * 5
@@ -1018,7 +1017,6 @@
         water.rotation.x = -Math.PI / 2;
         water.position.y = -0.5;
         scene.add(water);
-
         const createCactus = () => {
           const cactus = new THREE.Group();
           const cactusMaterial = LAMBERT_MATERIAL(0x2e8b57);
@@ -1055,7 +1053,6 @@
           cactus.rotation.y = Math.random() * Math.PI * 2;
           scene.add(cactus);
         }
-
         const createToilet = () => {
           const toilet = new THREE.Group();
           const doorCanvas = document.createElement("canvas");
@@ -1387,6 +1384,7 @@
             if (tank.position.distanceTo(toilet.position) < 5) {
               createExplosion(toilet.position, 2.0);
               gameState.players[i].ammo = 8;
+              displayMessage("DODATKOWA AMUNICJA!", 1500);
               scene.remove(toilet);
               gameObjects.toilets.splice(j, 1);
             }
@@ -1411,6 +1409,46 @@
         }
       }
 
+      // --- PRZYWRÓCONE FUNKCJE ---
+      function displayMessage(text, duration) {
+        const messageEl = document.getElementById("message-display");
+        clearTimeout(messageTimeout);
+        messageEl.innerText = text;
+        messageEl.style.display = "block";
+        messageTimeout = setTimeout(
+          () => (messageEl.style.display = "none"),
+          duration
+        );
+      }
+      function startReload(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        if (
+          playerState.ammo === 8 ||
+          playerState.isReloading ||
+          playerState.isDestroyed
+        )
+          return;
+        playerState.isReloading = true;
+        displayMessage(`Gracz ${playerIndex + 1}: PRZEŁADOWYWANIE...`, 3000);
+        setTimeout(() => {
+          playerState.ammo = 8;
+          playerState.isReloading = false;
+        }, 3000);
+      }
+      function healPlayer(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        const maxHealth = TANKS_DATA[playerState.tankType].stats.hp;
+        if (
+          playerState.medkits > 0 &&
+          playerState.health < maxHealth &&
+          !playerState.isDestroyed
+        ) {
+          playerState.medkits--;
+          playerState.health = Math.min(maxHealth, playerState.health + 30);
+          displayMessage(`Gracz ${playerIndex + 1}: LECZENIE...`, 1000);
+        }
+      }
+
       function animate() {
         requestAnimationFrame(animate);
         if (!gameState.gameStarted) return;
@@ -1425,15 +1463,19 @@
 
           const offset = new THREE.Vector3(0, 20, 35);
           if (player1Tank) {
-            const targetPos1 = player1Tank.position.clone().add(offset);
-            camera1.position.lerp(targetPos1, 0.1);
+            camera1.position.lerp(
+              player1Tank.position.clone().add(offset),
+              0.1
+            );
             camera1.lookAt(
               player1Tank.position.clone().add(new THREE.Vector3(0, 2, 0))
             );
           }
           if (player2Tank) {
-            const targetPos2 = player2Tank.position.clone().add(offset);
-            camera2.position.lerp(targetPos2, 0.1);
+            camera2.position.lerp(
+              player2Tank.position.clone().add(offset),
+              0.1
+            );
             camera2.lookAt(
               player2Tank.position.clone().add(new THREE.Vector3(0, 2, 0))
             );
@@ -1444,7 +1486,7 @@
         updateHUD();
         renderer.setViewport(0, 0, window.innerWidth / 2, window.innerHeight);
         renderer.setScissor(0, 0, window.innerWidth / 2, window.innerHeight);
-        if (camera1) renderer.render(scene, camera1);
+        if (camera1 && scene) renderer.render(scene, camera1);
         renderer.setViewport(
           window.innerWidth / 2,
           0,
@@ -1457,7 +1499,7 @@
           window.innerWidth / 2,
           window.innerHeight
         );
-        if (camera2) renderer.render(scene, camera2);
+        if (camera2 && scene) renderer.render(scene, camera2);
       }
 
       initializeUI();
