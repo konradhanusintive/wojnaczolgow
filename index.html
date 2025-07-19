@@ -423,6 +423,7 @@
       const MAP_SIZE = 500;
       const WATER_LEVEL = -0.5;
       const DROWN_LEVEL = -1.5;
+      const COLLISION_RADIUS = 7; // Promień kolizji między czołgami
 
       const TANKS_DATA = {
         pl01: {
@@ -1215,12 +1216,20 @@
         for (let i = 0; i < 2; i++) {
           const playerState = gameState.players[i];
           if (playerState.health <= 0 || playerState.isDestroyed) continue;
-          const tank = tanks[i],
-            controls = CONTROLS[i];
+
+          const tank = tanks[i];
+          const controls = CONTROLS[i];
+
+          // Zapisz pozycję i rotację PRZED ruchem
+          const oldPosition = tank.position.clone();
+          const oldRotationY = tank.rotation.y;
+
           const tankStats = TANKS_DATA[playerState.tankType].stats;
           const moveSpeed = tankStats.speed * delta;
           const rotateSpeed = tankStats.turretRot * delta;
           const wheelRotationSpeed = moveSpeed * 2.5;
+
+          // --- Sterowanie ruchem kadłuba ---
           if (keys[controls.fwd]) {
             tank.translateZ(moveSpeed);
             tank.tracks.forEach(
@@ -1237,6 +1246,22 @@
           }
           if (keys[controls.left]) tank.rotation.y += rotateSpeed * 0.8;
           if (keys[controls.right]) tank.rotation.y -= rotateSpeed * 0.8;
+
+          // --- Sprawdzenie kolizji ---
+          const otherTank = i === 0 ? player2Tank : player1Tank;
+          const otherPlayerState =
+            gameState.players[otherTank.userData.playerIndex];
+
+          if (
+            !otherPlayerState.isDestroyed &&
+            tank.position.distanceTo(otherTank.position) < COLLISION_RADIUS
+          ) {
+            // Kolizja! Cofnij ruch.
+            tank.position.copy(oldPosition);
+            tank.rotation.y = oldRotationY;
+          }
+
+          // --- Sterowanie wieżą i ogniem (nie wpływa na kolizję kadłubów) ---
           if (keys[controls.tLeft]) tank.turret.rotation.y += rotateSpeed;
           if (keys[controls.tRight]) tank.turret.rotation.y -= rotateSpeed;
           if (keys[controls.tUp] && tank.mantlet.rotation.x > -0.5)
@@ -1246,6 +1271,7 @@
           if (keys[controls.fire]) fire(i);
         }
       }
+
       function fire(playerIndex) {
         const playerState = gameState.players[playerIndex];
         if (
