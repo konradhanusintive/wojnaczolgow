@@ -419,11 +419,16 @@
         particles: [],
         toilets: [],
         wreckage: [],
+        houses: [],
+        fences: [],
+        rivers: [],
+        bridges: [],
       };
       const MAP_SIZE = 500;
       const WATER_LEVEL = -0.5;
-      const DROWN_LEVEL = -1.5;
-      const COLLISION_RADIUS = 7; // Promień kolizji między czołgami
+      const COLLISION_RADIUS = 7;
+      const HOUSE_HEALTH = 2;
+      const FENCE_COLLISION_RADIUS = 2.5;
 
       const TANKS_DATA = {
         pl01: {
@@ -1092,6 +1097,134 @@
           updatePauseState();
         });
       }
+      // --- NOWE I PRZYWRÓCONE FUNKCJE TWORZENIA SCENERII ---
+      function createHouse() {
+        const house = new THREE.Group();
+        const wallMaterial = LAMBERT_MATERIAL(0xac8c6c);
+        const roofMaterial = LAMBERT_MATERIAL(0xc05454);
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(14, 10, 20),
+          wallMaterial
+        );
+        body.position.y = 5;
+        house.add(body);
+        const roof = new THREE.Mesh(
+          new THREE.CylinderGeometry(0, 10, 6, 4),
+          roofMaterial
+        );
+        roof.position.y = 10 + 3;
+        roof.rotation.y = Math.PI / 4;
+        house.add(roof);
+        house.userData = {
+          isHouse: true,
+          health: HOUSE_HEALTH,
+          body: body,
+          roof: roof,
+        };
+        return house;
+      }
+
+      function createFenceSegment() {
+        const segment = new THREE.Group();
+        const postMaterial = LAMBERT_MATERIAL(0x654321);
+        const postGeom = new THREE.BoxGeometry(0.5, 4, 0.5);
+        const post1 = new THREE.Mesh(postGeom, postMaterial);
+        post1.position.set(-5, 2, 0);
+        segment.add(post1);
+        const post2 = post1.clone();
+        post2.position.set(5, 2, 0);
+        segment.add(post2);
+        const barGeom = new THREE.BoxGeometry(10, 0.5, 0.2);
+        const bar1 = new THREE.Mesh(barGeom, postMaterial);
+        bar1.position.set(0, 2.5, 0);
+        segment.add(bar1);
+        segment.userData.isFence = true;
+        return segment;
+      }
+
+      function createCactus() {
+        const cactus = new THREE.Group();
+        const cactusMaterial = LAMBERT_MATERIAL(0x2e8b57);
+        const basePadGeom = new THREE.SphereGeometry(1.5, 12, 8);
+        const createPad = () => {
+          const pad = new THREE.Mesh(basePadGeom, cactusMaterial);
+          pad.scale.set(0.8, 1, 0.2);
+          return pad;
+        };
+        const basePad = createPad();
+        basePad.position.y = 1.5;
+        cactus.add(basePad);
+        let lastPad = basePad;
+        const numPads = 2 + Math.floor(Math.random() * 4);
+        for (let i = 0; i < numPads; i++) {
+          const newPad = createPad();
+          newPad.position.copy(lastPad.position);
+          newPad.position.y += 1.3;
+          newPad.position.x += (Math.random() < 0.5 ? -1 : 1) * 0.5;
+          newPad.rotation.y = Math.random() * Math.PI;
+          newPad.rotation.z = (Math.random() - 0.5) * 0.5;
+          cactus.add(newPad);
+          lastPad = newPad;
+        }
+        return cactus;
+      }
+
+      function createToilet() {
+        const toilet = new THREE.Group();
+        const doorCanvas = document.createElement("canvas");
+        doorCanvas.width = 128;
+        doorCanvas.height = 256;
+        const ctx = doorCanvas.getContext("2d");
+        ctx.fillStyle = "#654321";
+        ctx.fillRect(0, 0, 128, 256);
+        ctx.font = "bold 60px Arial";
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.fillText("WC", 64, 80);
+        ctx.beginPath();
+        ctx.arc(64, 150, 30, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#654321";
+        ctx.beginPath();
+        ctx.arc(50, 150, 28, 0, Math.PI * 2);
+        ctx.fill();
+        const doorMaterial = new THREE.MeshLambertMaterial({
+          map: new THREE.CanvasTexture(doorCanvas),
+        });
+        const woodMaterial = LAMBERT_MATERIAL(0x8b4513);
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(4, 7, 4),
+          woodMaterial
+        );
+        body.position.y = 3.5;
+        toilet.add(body);
+        const door = new THREE.Mesh(
+          new THREE.PlaneGeometry(3, 6),
+          doorMaterial
+        );
+        door.position.set(0, 3.5, 2.05);
+        toilet.add(door);
+        const roof = new THREE.Mesh(
+          new THREE.BoxGeometry(5, 0.5, 5),
+          LAMBERT_MATERIAL(0x5d3a1a)
+        );
+        roof.position.y = 7.25;
+        roof.rotation.x = 0.2;
+        toilet.add(roof);
+        toilet.userData.isToilet = true;
+        return toilet;
+      }
+
+      function createBridge(position, length, rotation) {
+        const bridge = new THREE.Mesh(
+          new THREE.BoxGeometry(12, 1, length),
+          LAMBERT_MATERIAL(0x888888)
+        );
+        bridge.position.copy(position);
+        bridge.rotation.y = rotation;
+        scene.add(bridge);
+        gameObjects.bridges.push(bridge);
+      }
 
       function createScenery() {
         const ground = new THREE.Mesh(
@@ -1111,37 +1244,74 @@
           transparent: true,
           opacity: 0.8,
         });
-        const water = new THREE.Mesh(waterGeometry, waterMaterial);
-        water.rotation.x = -Math.PI / 2;
-        water.position.y = WATER_LEVEL;
-        scene.add(water);
+        const mainWater = new THREE.Mesh(waterGeometry, waterMaterial);
+        mainWater.rotation.x = -Math.PI / 2;
+        mainWater.position.y = WATER_LEVEL;
+        scene.add(mainWater);
 
-        const createCactus = () => {
-          const cactus = new THREE.Group();
-          const cactusMaterial = LAMBERT_MATERIAL(0x2e8b57);
-          const basePadGeom = new THREE.SphereGeometry(1.5, 12, 8);
-          const createPad = () => {
-            const pad = new THREE.Mesh(basePadGeom, cactusMaterial);
-            pad.scale.set(0.8, 1, 0.2);
-            return pad;
-          };
-          const basePad = createPad();
-          basePad.position.y = 1.5;
-          cactus.add(basePad);
-          let lastPad = basePad;
-          const numPads = 2 + Math.floor(Math.random() * 4);
-          for (let i = 0; i < numPads; i++) {
-            const newPad = createPad();
-            newPad.position.copy(lastPad.position);
-            newPad.position.y += 1.3;
-            newPad.position.x += (Math.random() < 0.5 ? -1 : 1) * 0.5;
-            newPad.rotation.y = Math.random() * Math.PI;
-            newPad.rotation.z = (Math.random() - 0.5) * 0.5;
-            cactus.add(newPad);
-            lastPad = newPad;
+        // --- Rzeka ---
+        const riverGeom = new THREE.PlaneGeometry(30, MAP_SIZE * 1.2);
+        const river = new THREE.Mesh(riverGeom, waterMaterial);
+        river.rotation.x = -Math.PI / 2;
+        river.position.y = WATER_LEVEL + 0.1;
+        river.position.x = 80;
+        scene.add(river);
+        gameObjects.rivers.push({
+          x: 80,
+          z: 0,
+          width: 30,
+          length: MAP_SIZE * 1.2,
+        });
+        createBridge(new THREE.Vector3(80, 0, 50), 30, 0);
+        createBridge(new THREE.Vector3(80, 0, -100), 30, 0);
+
+        // --- Domy ---
+        for (let i = 0; i < 5; i++) {
+          const house = createHouse();
+          house.position.set(
+            (Math.random() - 0.5) * (MAP_SIZE * 0.7),
+            0,
+            (Math.random() - 0.5) * (MAP_SIZE * 0.7)
+          );
+          if (
+            house.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 50 ||
+            Math.abs(house.position.x - 80) < 30
+          ) {
+            i--; // Spróbuj ponownie, jeśli wylosowano pozycję na środku lub na rzece
+            continue;
           }
-          return cactus;
+          house.rotation.y = Math.random() * Math.PI;
+          scene.add(house);
+          gameObjects.houses.push(house);
+        }
+
+        // --- Mury ---
+        const createWall = (start, end, count) => {
+          for (let i = 0; i <= count; i++) {
+            const fence = createFenceSegment();
+            const position = new THREE.Vector3().lerpVectors(
+              start,
+              end,
+              i / count
+            );
+            fence.position.copy(position);
+            fence.lookAt(end);
+            scene.add(fence);
+            gameObjects.fences.push(fence);
+          }
         };
+        createWall(
+          new THREE.Vector3(-100, 0, 150),
+          new THREE.Vector3(50, 0, 150),
+          15
+        );
+        createWall(
+          new THREE.Vector3(-100, 0, -150),
+          new THREE.Vector3(50, 0, -150),
+          15
+        );
+
+        // --- Kaktusy i toalety (przywrócone) ---
         for (let i = 0; i < 40; i++) {
           const cactus = createCactus();
           cactus.position.set(
@@ -1149,55 +1319,8 @@
             0,
             (Math.random() - 0.5) * (MAP_SIZE - 50)
           );
-          cactus.rotation.y = Math.random() * Math.PI * 2;
           scene.add(cactus);
         }
-
-        const createToilet = () => {
-          const toilet = new THREE.Group();
-          const doorCanvas = document.createElement("canvas");
-          doorCanvas.width = 128;
-          doorCanvas.height = 256;
-          const ctx = doorCanvas.getContext("2d");
-          ctx.fillStyle = "#654321";
-          ctx.fillRect(0, 0, 128, 256);
-          ctx.font = "bold 60px Arial";
-          ctx.fillStyle = "white";
-          ctx.textAlign = "center";
-          ctx.fillText("WC", 64, 80);
-          ctx.beginPath();
-          ctx.arc(64, 150, 30, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = "#654321";
-          ctx.beginPath();
-          ctx.arc(50, 150, 28, 0, Math.PI * 2);
-          ctx.fill();
-          const doorMaterial = new THREE.MeshLambertMaterial({
-            map: new THREE.CanvasTexture(doorCanvas),
-          });
-          const woodMaterial = LAMBERT_MATERIAL(0x8b4513);
-          const body = new THREE.Mesh(
-            new THREE.BoxGeometry(4, 7, 4),
-            woodMaterial
-          );
-          body.position.y = 3.5;
-          toilet.add(body);
-          const door = new THREE.Mesh(
-            new THREE.PlaneGeometry(3, 6),
-            doorMaterial
-          );
-          door.position.set(0, 3.5, 2.05);
-          toilet.add(door);
-          const roof = new THREE.Mesh(
-            new THREE.BoxGeometry(5, 0.5, 5),
-            LAMBERT_MATERIAL(0x5d3a1a)
-          );
-          roof.position.y = 7.25;
-          roof.rotation.x = 0.2;
-          toilet.add(roof);
-          toilet.userData.isToilet = true;
-          return toilet;
-        };
         for (let i = 0; i < 10; i++) {
           const toilet = createToilet();
           toilet.position.set(
@@ -1205,7 +1328,6 @@
             0,
             (Math.random() - 0.5) * (MAP_SIZE - 80) + 20
           );
-          toilet.rotation.y = Math.random() * Math.PI * 2;
           scene.add(toilet);
           gameObjects.toilets.push(toilet);
         }
@@ -1219,8 +1341,6 @@
 
           const tank = tanks[i];
           const controls = CONTROLS[i];
-
-          // Zapisz pozycję i rotację PRZED ruchem
           const oldPosition = tank.position.clone();
           const oldRotationY = tank.rotation.y;
 
@@ -1229,7 +1349,6 @@
           const rotateSpeed = tankStats.turretRot * delta;
           const wheelRotationSpeed = moveSpeed * 2.5;
 
-          // --- Sterowanie ruchem kadłuba ---
           if (keys[controls.fwd]) {
             tank.translateZ(moveSpeed);
             tank.tracks.forEach(
@@ -1247,7 +1366,6 @@
           if (keys[controls.left]) tank.rotation.y += rotateSpeed * 0.8;
           if (keys[controls.right]) tank.rotation.y -= rotateSpeed * 0.8;
 
-          // --- Sprawdzenie kolizji ---
           const otherTank = i === 0 ? player2Tank : player1Tank;
           const otherPlayerState =
             gameState.players[otherTank.userData.playerIndex];
@@ -1256,12 +1374,10 @@
             !otherPlayerState.isDestroyed &&
             tank.position.distanceTo(otherTank.position) < COLLISION_RADIUS
           ) {
-            // Kolizja! Cofnij ruch.
             tank.position.copy(oldPosition);
             tank.rotation.y = oldRotationY;
           }
 
-          // --- Sterowanie wieżą i ogniem (nie wpływa na kolizję kadłubów) ---
           if (keys[controls.tLeft]) tank.turret.rotation.y += rotateSpeed;
           if (keys[controls.tRight]) tank.turret.rotation.y -= rotateSpeed;
           if (keys[controls.tUp] && tank.mantlet.rotation.x > -0.5)
@@ -1330,6 +1446,8 @@
           const p = gameObjects.projectiles[i];
           p.position.add(p.velocity.clone().multiplyScalar(delta));
           let destroyed = false;
+
+          // Sprawdzanie kolizji z czołgami
           const targets = [player1Tank, player2Tank];
           for (const target of targets) {
             const targetState = gameState.players[target.userData.playerIndex];
@@ -1346,6 +1464,37 @@
               }
             }
           }
+          if (destroyed) {
+            scene.remove(p);
+            p.geometry.dispose();
+            p.material.dispose();
+            gameObjects.projectiles.splice(i, 1);
+            continue;
+          }
+
+          // Sprawdzanie kolizji z domami
+          for (let j = gameObjects.houses.length - 1; j >= 0; j--) {
+            const house = gameObjects.houses[j];
+            if (p.position.distanceTo(house.position) < 12) {
+              house.userData.health--;
+              createExplosion(p.position, 1.0, true);
+              if (house.userData.health <= 0) {
+                destroyHouse(house);
+                gameObjects.houses.splice(j, 1);
+              }
+              destroyed = true;
+              break;
+            }
+          }
+          if (destroyed) {
+            scene.remove(p);
+            p.geometry.dispose();
+            p.material.dispose();
+            gameObjects.projectiles.splice(i, 1);
+            continue;
+          }
+
+          // Sprawdzanie kolizji z ziemią
           if (p.position.y <= 0.2) {
             createExplosion(p.position, 0.8, true);
             destroyed = true;
@@ -1358,6 +1507,7 @@
           }
         }
       }
+
       function handleDamage(target, amount) {
         const playerIndex = target.userData.playerIndex;
         const playerState = gameState.players[playerIndex];
@@ -1371,14 +1521,14 @@
           playerState.isDestroyed = true;
           playerState.respawnTimer = 3.0;
           destroyTank(target);
-          showTankQuote(playerIndex); // show quote on death
+          showTankQuote(playerIndex);
         } else {
-          // Show quote on getting hit
           if (Math.random() > 0.6) {
             showTankQuote(playerIndex);
           }
         }
       }
+
       function destroyTank(tank) {
         createExplosion(tank.position, 4);
         tank.visible = false;
@@ -1405,6 +1555,37 @@
           gameObjects.wreckage.push(wreckObject);
         });
       }
+
+      function destroyHouse(house) {
+        createExplosion(house.position, 5, true);
+        house.visible = false;
+        const partsToDestroy = [house.userData.body, house.userData.roof];
+        partsToDestroy.forEach((part) => {
+          const wreckClone = part.clone();
+          house.getWorldPosition(wreckClone.position);
+          wreckClone.position.y += part.position.y;
+          house.getWorldQuaternion(wreckClone.quaternion);
+
+          scene.add(wreckClone);
+          const wreckObject = {
+            object: wreckClone,
+            velocity: new THREE.Vector3(
+              (Math.random() - 0.5) * 10,
+              Math.random() * 10 + 2,
+              (Math.random() - 0.5) * 10
+            ),
+            angularVelocity: new THREE.Vector3(
+              (Math.random() - 0.5) * 2,
+              (Math.random() - 0.5) * 2,
+              (Math.random() - 0.5) * 2
+            ),
+            lifespan: 15.0,
+          };
+          gameObjects.wreckage.push(wreckObject);
+        });
+        scene.remove(house);
+      }
+
       function updateWreckage(delta) {
         const gravity = -30;
         for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
@@ -1434,6 +1615,7 @@
           }
         }
       }
+
       function checkRespawns(delta) {
         for (let i = 0; i < 2; i++) {
           const playerState = gameState.players[i];
@@ -1460,9 +1642,86 @@
         for (let i = 0; i < 2; i++) {
           const tank = tanks[i];
           const playerState = gameState.players[i];
-          if (!playerState.isDestroyed && tank.position.y < DROWN_LEVEL) {
-            createExplosion(tank.position, 4, false, true); // Water explosion
-            handleDamage(tank, 9999); // Instantly destroy
+          if (playerState.isDestroyed) continue;
+
+          let isDrowning = false;
+          // Sprawdzanie krawędzi mapy
+          if (
+            Math.abs(tank.position.x) > MAP_SIZE / 2 ||
+            Math.abs(tank.position.z) > MAP_SIZE / 2
+          ) {
+            isDrowning = true;
+          }
+
+          // Sprawdzanie rzek
+          if (!isDrowning) {
+            for (const river of gameObjects.rivers) {
+              const halfWidth = river.width / 2;
+              const halfLength = river.length / 2;
+              if (
+                tank.position.x > river.x - halfWidth &&
+                tank.position.x < river.x + halfWidth &&
+                tank.position.z > river.z - halfLength &&
+                tank.position.z < river.z + halfLength
+              ) {
+                // Jest w strefie rzeki, sprawdź czy nie jest na moście
+                let onBridge = false;
+                for (const bridge of gameObjects.bridges) {
+                  if (
+                    tank.position.distanceTo(bridge.position) <
+                    bridge.geometry.parameters.depth / 2
+                  ) {
+                    onBridge = true;
+                    break;
+                  }
+                }
+                if (!onBridge) {
+                  isDrowning = true;
+                }
+              }
+            }
+          }
+
+          if (isDrowning) {
+            const drownPosition = tank.position.clone();
+            drownPosition.y = WATER_LEVEL + 1;
+            createExplosion(drownPosition, 4, false, true); // Eksplozja wodna
+            handleDamage(tank, 9999); // Natychmiastowe zniszczenie
+          }
+        }
+      }
+
+      function checkFenceCollisions() {
+        const tanks = [player1Tank, player2Tank];
+        for (const tank of tanks) {
+          if (gameState.players[tank.userData.playerIndex].isDestroyed)
+            continue;
+          for (let i = gameObjects.fences.length - 1; i >= 0; i--) {
+            const fence = gameObjects.fences[i];
+            if (
+              tank.position.distanceTo(fence.position) < FENCE_COLLISION_RADIUS
+            ) {
+              createExplosion(fence.position, 1.0, true);
+              scene.remove(fence);
+              gameObjects.fences.splice(i, 1);
+            }
+          }
+        }
+      }
+
+      function checkToiletCollisions() {
+        const tanks = [player1Tank, player2Tank];
+        for (let i = 0; i < tanks.length; i++) {
+          const tank = tanks[i];
+          if (gameState.players[i].isDestroyed) continue;
+          for (let j = gameObjects.toilets.length - 1; j >= 0; j--) {
+            const toilet = gameObjects.toilets[j];
+            if (tank.position.distanceTo(toilet.position) < 5) {
+              createExplosion(toilet.position, 2.0);
+              gameState.players[i].ammo = 8;
+              scene.remove(toilet);
+              gameObjects.toilets.splice(j, 1);
+            }
           }
         }
       }
@@ -1519,7 +1778,40 @@
         const mapX = (x) => (x / MAP_SIZE) * w + w / 2;
         const mapZ = (z) => (z / MAP_SIZE) * h + h / 2;
 
-        // Draw toilets
+        // Rzeki
+        ctx.fillStyle = "rgba(0, 30, 61, 0.8)";
+        gameObjects.rivers.forEach((river) => {
+          ctx.fillRect(
+            mapX(river.x - river.width / 2),
+            mapZ(river.z - river.length / 2),
+            (river.width / MAP_SIZE) * w,
+            (river.length / MAP_SIZE) * h
+          );
+        });
+
+        // Mosty
+        ctx.fillStyle = "#888888";
+        gameObjects.bridges.forEach((bridge) => {
+          ctx.fillRect(
+            mapX(bridge.position.x - bridge.geometry.parameters.width / 2),
+            mapZ(bridge.position.z - bridge.geometry.parameters.depth / 2),
+            (bridge.geometry.parameters.width / MAP_SIZE) * w,
+            (bridge.geometry.parameters.depth / MAP_SIZE) * h
+          );
+        });
+
+        // Domy
+        ctx.fillStyle = "#A0522D";
+        gameObjects.houses.forEach((house) => {
+          ctx.fillRect(
+            mapX(house.position.x) - 6,
+            mapZ(house.position.z) - 8,
+            12,
+            16
+          );
+        });
+
+        // Toalety
         ctx.fillStyle = "yellow";
         ctx.font = "bold 10px sans-serif";
         ctx.textAlign = "center";
@@ -1530,7 +1822,7 @@
           ctx.fillText("WC", x, z - 5);
         });
 
-        // Draw players
+        // Gracze
         if (!gameState.players[0].isDestroyed) {
           ctx.fillStyle = "#38A849";
           ctx.beginPath();
@@ -1556,26 +1848,7 @@
           ctx.fill();
         }
       }
-      function checkToiletCollisions() {
-        const tanks = [player1Tank, player2Tank];
-        for (let i = 0; i < tanks.length; i++) {
-          const tank = tanks[i];
-          if (
-            gameState.players[i].health <= 0 ||
-            gameState.players[i].isDestroyed
-          )
-            continue;
-          for (let j = gameObjects.toilets.length - 1; j >= 0; j--) {
-            const toilet = gameObjects.toilets[j];
-            if (tank.position.distanceTo(toilet.position) < 5) {
-              createExplosion(toilet.position, 2.0);
-              gameState.players[i].ammo = 8;
-              scene.remove(toilet);
-              gameObjects.toilets.splice(j, 1);
-            }
-          }
-        }
-      }
+
       function updateParticles(delta) {
         const gravity = -9.8;
         for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
@@ -1668,8 +1941,9 @@
           updateParticles(delta);
           updateWreckage(delta);
           checkRespawns(delta);
-          checkToiletCollisions();
           checkDrowning();
+          checkFenceCollisions();
+          checkToiletCollisions();
           updateBubbles();
 
           const offset = new THREE.Vector3(0, 20, 35);
