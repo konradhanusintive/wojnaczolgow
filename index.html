@@ -1542,7 +1542,7 @@
         );
         const minePos = tank.position
           .clone()
-          .add(new THREE.Vector3(0, 0, 7).applyQuaternion(tank.quaternion));
+          .add(new THREE.Vector3(0, 0, -7).applyQuaternion(tank.quaternion)); // Poprawka: za czołgiem
         mine.position.set(minePos.x, 0.25, minePos.z);
         mine.ownerIndex = playerIndex;
         gameObjects.mines.push(mine);
@@ -2089,10 +2089,7 @@
 
       function spawnCrate() {
         const crate = new THREE.Group();
-        const box = new THREE.Mesh(
-          new THREE.BoxGeometry(3, 3, 3),
-          LAMBERT_MATERIAL(0xdaa520)
-        );
+        const box = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3));
         const questionMarkCanvas = document.createElement("canvas");
         questionMarkCanvas.width = 128;
         questionMarkCanvas.height = 128;
@@ -2112,17 +2109,56 @@
           LAMBERT_MATERIAL(0xeeeeee)
         );
         parachute.position.y = 5;
-        crate.add(box, parachute);
-        crate.position.set(
-          (Math.random() - 0.5) * (MAP_SIZE - 40),
-          150,
-          (Math.random() - 0.5) * (MAP_SIZE - 40)
+
+        // Sznurki do spadochronu
+        const points = [];
+        points.push(new THREE.Vector3(-3, 5, -3));
+        points.push(new THREE.Vector3(-1.5, 1.5, -1.5));
+        points.push(new THREE.Vector3(3, 5, -3));
+        points.push(new THREE.Vector3(1.5, 1.5, -1.5));
+        points.push(new THREE.Vector3(-3, 5, 3));
+        points.push(new THREE.Vector3(-1.5, 1.5, 1.5));
+        points.push(new THREE.Vector3(3, 5, 3));
+        points.push(new THREE.Vector3(1.5, 1.5, 1.5));
+        const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+        const lines = new THREE.LineSegments(
+          lineGeom,
+          new THREE.LineBasicMaterial({ color: 0x555555 })
         );
+
+        crate.add(box, parachute, lines);
+
+        const spawnX = (Math.random() - 0.5) * (MAP_SIZE - 40);
+        const spawnZ = (Math.random() - 0.5) * (MAP_SIZE - 40);
+        crate.position.set(spawnX, 150, spawnZ);
+
+        // Cień/wskaźnik lądowania
+        const shadow = new THREE.Mesh(
+          new THREE.CircleGeometry(5, 32),
+          new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.4,
+          })
+        );
+        shadow.rotation.x = -Math.PI / 2;
+        shadow.position.set(spawnX, 0.1, spawnZ);
+        scene.add(shadow);
+
         crate.userData.powerUpType =
           POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
         crate.userData.parachute = parachute;
+        crate.userData.lines = lines;
+        crate.userData.shadow = shadow;
+
         gameObjects.crates.push(crate);
         scene.add(crate);
+
+        console.log(
+          `Pojawiła się skrzynia z mocą: ${
+            crate.userData.powerUpType
+          } na pozycji X:${spawnX.toFixed(0)}, Z:${spawnZ.toFixed(0)}`
+        );
       }
 
       function updateCrates(delta) {
@@ -2135,6 +2171,7 @@
             crate.position.y = 1.5;
             if (crate.userData.parachute) {
               crate.remove(crate.userData.parachute);
+              crate.remove(crate.userData.lines);
               crate.userData.parachute = null;
             }
           }
@@ -2149,6 +2186,7 @@
                 crate.userData.powerUpType
               );
               scene.remove(crate);
+              scene.remove(crate.userData.shadow);
               gameObjects.crates.splice(i, 1);
               break;
             }
@@ -2158,6 +2196,7 @@
 
       function activatePowerUp(playerIndex, type) {
         const playerState = gameState.players[playerIndex];
+        deactivatePowerUp(playerIndex); // Najpierw zresetuj poprzednią moc
         playerState.activePowerUp = type;
         switch (type) {
           case "turbo":
@@ -2222,6 +2261,7 @@
           m.lifespan -= delta;
 
           if (
+            target &&
             !gameState.players[target.userData.playerIndex].isDestroyed &&
             m.lifespan > 0
           ) {
@@ -2230,12 +2270,16 @@
               .normalize();
             m.quaternion.slerp(
               new THREE.Quaternion().setFromUnitVectors(
-                new THREE.Vector3(0, 1, 0),
+                new THREE.Vector3(0, 0, 1),
                 direction
               ),
               0.08
             );
-            m.position.add(direction.multiplyScalar(60 * delta));
+            m.position.add(
+              new THREE.Vector3(0, 0, 1)
+                .applyQuaternion(m.quaternion)
+                .multiplyScalar(60 * delta)
+            );
 
             if (m.position.distanceTo(target.position) < 5) {
               const damage = TANKS_DATA[m.ownerTankType].stats.damage * 2;
