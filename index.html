@@ -429,8 +429,6 @@
         wreckage: [],
         houses: [],
         fences: [],
-        rivers: [],
-        bridges: [],
         crates: [],
         mines: [],
         missiles: [],
@@ -1119,7 +1117,7 @@
           updatePauseState();
         });
       }
-      // --- NOWE I PRZYWRÓCONE FUNKCJE TWORZENIA SCENERII ---
+
       function createHouse() {
         const house = new THREE.Group();
         const wallMaterial = LAMBERT_MATERIAL(0xac8c6c);
@@ -1237,15 +1235,52 @@
         return toilet;
       }
 
-      function createBridge(position, length, rotation) {
-        const bridge = new THREE.Mesh(
-          new THREE.BoxGeometry(12, 1, length),
-          LAMBERT_MATERIAL(0x888888)
+      function createCrateMaterial() {
+        const canvas = document.createElement("canvas");
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext("2d");
+        // Tło drewna
+        ctx.fillStyle = "#8B4513";
+        ctx.fillRect(0, 0, 256, 256);
+        // Deski
+        ctx.strokeStyle = "#5a2d0c";
+        ctx.lineWidth = 4;
+        for (let i = 0; i < 8; i++) {
+          ctx.beginPath();
+          ctx.moveTo(i * 32, 0);
+          ctx.lineTo(i * 32, 256);
+          ctx.stroke();
+        }
+        // Metalowe okucia
+        ctx.fillStyle = "#808080";
+        ctx.fillRect(0, 20, 256, 20);
+        ctx.fillRect(0, 216, 256, 20);
+        // Znak zapytania
+        ctx.font = "bold 180px Arial";
+        ctx.fillStyle = "yellow";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("?", 128, 138);
+
+        return new THREE.MeshLambertMaterial({
+          map: new THREE.CanvasTexture(canvas),
+        });
+      }
+
+      function createSupplyCrate() {
+        const crate = new THREE.Group();
+        const material = createCrateMaterial();
+        const base = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), material);
+        base.position.y = 1;
+        const lid = new THREE.Mesh(
+          new THREE.CylinderGeometry(1.25, 1.25, 3, 16, 1, false, 0, Math.PI),
+          material
         );
-        bridge.position.copy(position);
-        bridge.rotation.y = rotation;
-        scene.add(bridge);
-        gameObjects.bridges.push(bridge);
+        lid.rotation.z = Math.PI / 2;
+        lid.position.y = 2;
+        crate.add(base, lid);
+        return crate;
       }
 
       function createScenery() {
@@ -1271,39 +1306,6 @@
         mainWater.position.y = WATER_LEVEL;
         scene.add(mainWater);
 
-        const RIVER_X = 80;
-        const RIVER_WIDTH = 40;
-
-        // --- Dno rzeki (dla wizualnego efektu głębi) ---
-        const riverBedGeom = new THREE.PlaneGeometry(
-          RIVER_WIDTH,
-          MAP_SIZE * 1.2
-        );
-        const riverBedMaterial = new THREE.MeshLambertMaterial({
-          color: 0x4a4230,
-        }); // Ciemny, błotnisty kolor
-        const riverBed = new THREE.Mesh(riverBedGeom, riverBedMaterial);
-        riverBed.rotation.x = -Math.PI / 2;
-        riverBed.position.set(RIVER_X, WATER_LEVEL - 0.2, 0);
-        scene.add(riverBed);
-
-        // --- Rzeka (płaszczyzna wody) ---
-        const riverGeom = new THREE.PlaneGeometry(RIVER_WIDTH, MAP_SIZE * 1.2);
-        const river = new THREE.Mesh(riverGeom, waterMaterial);
-        river.rotation.x = -Math.PI / 2;
-        river.position.y = WATER_LEVEL + 0.1; // Nieco wyżej niż dno oceanu
-        river.position.x = RIVER_X;
-        scene.add(river);
-        gameObjects.rivers.push({
-          x: RIVER_X,
-          z: 0,
-          width: RIVER_WIDTH,
-          length: MAP_SIZE * 1.2,
-        });
-
-        createBridge(new THREE.Vector3(RIVER_X, 0, 50), RIVER_WIDTH, 0);
-        createBridge(new THREE.Vector3(RIVER_X, 0, -100), RIVER_WIDTH, 0);
-
         // --- Domy ---
         for (let i = 0; i < 5; i++) {
           const house = createHouse();
@@ -1312,11 +1314,8 @@
             0,
             (Math.random() - 0.5) * (MAP_SIZE * 0.7)
           );
-          if (
-            house.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 50 ||
-            Math.abs(house.position.x - RIVER_X) < RIVER_WIDTH
-          ) {
-            i--; // Spróbuj ponownie, jeśli wylosowano pozycję na środku lub na rzece
+          if (house.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 50) {
+            i--;
             continue;
           }
           house.rotation.y = Math.random() * Math.PI;
@@ -1341,13 +1340,13 @@
         };
         createWall(
           new THREE.Vector3(-100, 0, 150),
-          new THREE.Vector3(50, 0, 150),
-          15
+          new THREE.Vector3(100, 0, 150),
+          20
         );
         createWall(
           new THREE.Vector3(-100, 0, -150),
-          new THREE.Vector3(50, 0, -150),
-          15
+          new THREE.Vector3(100, 0, -150),
+          20
         );
 
         // --- Kaktusy i toalety (przywrócone) ---
@@ -1804,45 +1803,11 @@
           const playerState = gameState.players[i];
           if (playerState.isDestroyed) continue;
 
-          let isDrowning = false;
           // Sprawdzanie krawędzi mapy
           if (
             Math.abs(tank.position.x) > MAP_SIZE / 2 ||
             Math.abs(tank.position.z) > MAP_SIZE / 2
           ) {
-            isDrowning = true;
-          }
-
-          // Sprawdzanie rzek
-          if (!isDrowning) {
-            for (const river of gameObjects.rivers) {
-              const halfWidth = river.width / 2;
-              const halfLength = river.length / 2;
-              if (
-                tank.position.x > river.x - halfWidth &&
-                tank.position.x < river.x + halfWidth &&
-                tank.position.z > river.z - halfLength &&
-                tank.position.z < river.z + halfLength
-              ) {
-                // Jest w strefie rzeki, sprawdź czy nie jest na moście
-                let onBridge = false;
-                for (const bridge of gameObjects.bridges) {
-                  if (
-                    tank.position.distanceTo(bridge.position) <
-                    bridge.geometry.parameters.depth / 1.5
-                  ) {
-                    onBridge = true;
-                    break;
-                  }
-                }
-                if (!onBridge) {
-                  isDrowning = true;
-                }
-              }
-            }
-          }
-
-          if (isDrowning) {
             drownTank(tank);
           }
         }
@@ -1959,28 +1924,6 @@
         const mapX = (x) => (x / MAP_SIZE) * w + w / 2;
         const mapZ = (z) => (z / MAP_SIZE) * h + h / 2;
 
-        // Rzeki
-        ctx.fillStyle = "rgba(0, 30, 61, 0.8)";
-        gameObjects.rivers.forEach((river) => {
-          ctx.fillRect(
-            mapX(river.x - river.width / 2),
-            mapZ(river.z - river.length / 2),
-            (river.width / MAP_SIZE) * w,
-            (river.length / MAP_SIZE) * h
-          );
-        });
-
-        // Mosty
-        ctx.fillStyle = "#888888";
-        gameObjects.bridges.forEach((bridge) => {
-          ctx.fillRect(
-            mapX(bridge.position.x - bridge.geometry.parameters.width / 2),
-            mapZ(bridge.position.z - bridge.geometry.parameters.depth / 2),
-            (bridge.geometry.parameters.width / MAP_SIZE) * w,
-            (bridge.geometry.parameters.depth / MAP_SIZE) * h
-          );
-        });
-
         // Domy
         ctx.fillStyle = "#A0522D";
         gameObjects.houses.forEach((house) => {
@@ -1993,7 +1936,9 @@
         });
 
         // Skrzynie z zaopatrzeniem
-        ctx.fillStyle = "#FF00FF"; // Magenta
+        ctx.fillStyle = "#9400D3"; // Fioletowy
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 1;
         ctx.font = "bold 12px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -2001,7 +1946,10 @@
           const x = mapX(crate.position.x);
           const z = mapZ(crate.position.z);
           ctx.fillRect(x - 4, z - 4, 8, 8);
-          ctx.fillText("?", x, z);
+          ctx.strokeRect(x - 4, z - 4, 8, 8);
+          ctx.fillStyle = "white";
+          ctx.fillText("?", x, z + 1);
+          ctx.fillStyle = "#9400D3";
         });
 
         // Toalety
@@ -2135,45 +2083,21 @@
       }
 
       function spawnCrate() {
-        const box = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3));
-        const questionMarkCanvas = document.createElement("canvas");
-        questionMarkCanvas.width = 128;
-        questionMarkCanvas.height = 128;
-        const ctx = questionMarkCanvas.getContext("2d");
-        ctx.fillStyle = "#8B4513";
-        ctx.fillRect(0, 0, 128, 128);
-        ctx.font = "bold 100px Arial";
-        ctx.fillStyle = "yellow";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("?", 64, 74);
-        const qmTexture = new THREE.CanvasTexture(questionMarkCanvas);
-        box.material = new THREE.MeshLambertMaterial({ map: qmTexture });
+        const crate = createSupplyCrate();
+        let spawnX, spawnZ;
+        spawnX = (Math.random() - 0.5) * (MAP_SIZE - 40);
+        spawnZ = (Math.random() - 0.5) * (MAP_SIZE - 40);
 
-        let spawnX, spawnZ, validPosition;
-        do {
-          validPosition = true;
-          spawnX = (Math.random() - 0.5) * (MAP_SIZE - 40);
-          spawnZ = (Math.random() - 0.5) * (MAP_SIZE - 40);
-          // Sprawdź, czy nie spawnuje się na rzece
-          for (const river of gameObjects.rivers) {
-            if (Math.abs(spawnX - river.x) < river.width / 2) {
-              validPosition = false;
-              break;
-            }
-          }
-        } while (!validPosition);
-
-        box.position.set(spawnX, 1.5, spawnZ);
-        box.userData.powerUpType =
+        crate.position.set(spawnX, 1.5, spawnZ);
+        crate.userData.powerUpType =
           POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
 
-        gameObjects.crates.push(box);
-        scene.add(box);
+        gameObjects.crates.push(crate);
+        scene.add(crate);
 
         console.log(
           `Pojawiła się skrzynia z mocą: ${
-            box.userData.powerUpType
+            crate.userData.powerUpType
           } na pozycji X:${spawnX.toFixed(0)}, Z:${spawnZ.toFixed(0)}`
         );
       }
