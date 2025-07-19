@@ -178,6 +178,13 @@
         justify-content: space-between;
         margin-bottom: 5px;
       }
+      .hud-powerup {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed #777;
+        color: #ffc107;
+        font-weight: bold;
+      }
       .hud-bar {
         background: #555;
         border-radius: 5px;
@@ -412,6 +419,7 @@
       let camera1, camera2;
       let player1Tank, player2Tank;
       let selectionRenderers = [];
+      let crateSpawnTimer = 20.0;
 
       const keys = {};
       const gameObjects = {
@@ -423,12 +431,17 @@
         fences: [],
         rivers: [],
         bridges: [],
+        crates: [],
+        mines: [],
+        missiles: [],
+        machineGunBullets: [],
       };
       const MAP_SIZE = 500;
       const WATER_LEVEL = -0.5;
       const COLLISION_RADIUS = 7;
       const HOUSE_HEALTH = 2;
       const FENCE_COLLISION_RADIUS = 2.5;
+      const POWERUP_TYPES = ["turbo", "machinegun", "missile", "mines"];
 
       const TANKS_DATA = {
         pl01: {
@@ -481,6 +494,9 @@
             canFire: true,
             isDestroyed: false,
             respawnTimer: 0,
+            activePowerUp: null,
+            powerUpTimer: 0,
+            powerUpAmmo: 0,
           },
           {
             tankType: null,
@@ -491,6 +507,9 @@
             canFire: true,
             isDestroyed: false,
             respawnTimer: 0,
+            activePowerUp: null,
+            powerUpTimer: 0,
+            powerUpAmmo: 0,
           },
         ],
       };
@@ -508,6 +527,7 @@
           fire: "Space",
           reload: "KeyR",
           heal: "KeyB",
+          mine: "KeyG",
         },
         {
           fwd: "ArrowUp",
@@ -521,6 +541,7 @@
           fire: "Enter",
           reload: "Numpad1",
           heal: "Numpad2",
+          mine: "Numpad3",
         },
       ];
 
@@ -1043,10 +1064,10 @@
         gameState.gameStarted = true;
         document.getElementById(
           "hud-left"
-        ).innerHTML = `<div class="hud-line"><strong>GRACZ 1</strong><span>HP: <span id="hp-value-1"></span></span></div><div class="hud-bar"><div id="hp-bar-1" class="hud-bar-fill"></div></div><div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value-1"></span></div><div class="hud-line"><span>Apteczki:</span><span id="medkits-value-1"></span></div>`;
+        ).innerHTML = `<div class="hud-line"><strong>GRACZ 1</strong><span>HP: <span id="hp-value-1"></span></span></div><div class="hud-bar"><div id="hp-bar-1" class="hud-bar-fill"></div></div><div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value-1"></span></div><div class="hud-line"><span>Apteczki:</span><span id="medkits-value-1"></span></div><div id="powerup-hud-1" class="hud-powerup" style="display: none;"></div>`;
         document.getElementById(
           "hud-right"
-        ).innerHTML = `<div class="hud-line"><strong>GRACZ 2</strong><span>HP: <span id="hp-value-2"></span></span></div><div class="hud-bar"><div id="hp-bar-2" class="hud-bar-fill"></div></div><div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value-2"></span></div><div class="hud-line"><span>Apteczki:</span><span id="medkits-value-2"></span></div>`;
+        ).innerHTML = `<div class="hud-line"><strong>GRACZ 2</strong><span>HP: <span id="hp-value-2"></span></span></div><div class="hud-bar"><div id="hp-bar-2" class="hud-bar-fill"></div></div><div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value-2"></span></div><div class="hud-line"><span>Apteczki:</span><span id="medkits-value-2"></span></div><div id="powerup-hud-2" class="hud-powerup" style="display: none;"></div>`;
         updateHUD();
         setupEventListeners();
         createScenery();
@@ -1066,6 +1087,7 @@
           for (let i = 0; i < 2; i++) {
             if (e.code === CONTROLS[i].reload) startReload(i);
             if (e.code === CONTROLS[i].heal) healPlayer(i);
+            if (e.code === CONTROLS[i].mine) dropMine(i);
           }
         });
         const menuEl = document.getElementById("menu"),
@@ -1345,7 +1367,10 @@
           const oldRotationY = tank.rotation.y;
 
           const tankStats = TANKS_DATA[playerState.tankType].stats;
-          const moveSpeed = tankStats.speed * delta;
+          let moveSpeed = tankStats.speed * delta;
+          if (playerState.activePowerUp === "turbo") {
+            moveSpeed *= 4;
+          }
           const rotateSpeed = tankStats.turretRot * delta;
           const wheelRotationSpeed = moveSpeed * 2.5;
 
@@ -1390,15 +1415,27 @@
 
       function fire(playerIndex) {
         const playerState = gameState.players[playerIndex];
-        if (
-          !playerState.canFire ||
-          playerState.isReloading ||
-          playerState.ammo <= 0 ||
-          playerState.isDestroyed
-        )
-          return;
+        if (playerState.isDestroyed || !playerState.canFire) return;
+
+        switch (playerState.activePowerUp) {
+          case "machinegun":
+            fireMachineGun(playerIndex);
+            break;
+          case "missile":
+            fireMissile(playerIndex);
+            break;
+          default:
+            fireCannon(playerIndex);
+            break;
+        }
+      }
+
+      function fireCannon(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        if (playerState.isReloading || playerState.ammo <= 0) return;
         playerState.ammo--;
         playerState.canFire = false;
+
         const tank = playerIndex === 0 ? player1Tank : player2Tank;
         const projectile = new THREE.Mesh(
           new THREE.CapsuleGeometry(0.25, 1.0, 4, 8),
@@ -1423,7 +1460,97 @@
         scene.add(projectile);
         setTimeout(() => {
           playerState.canFire = true;
-        }, 500);
+        }, 500); // Standard cooldown
+      }
+
+      function fireMachineGun(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        playerState.canFire = false;
+
+        const tank = playerIndex === 0 ? player1Tank : player2Tank;
+        const bullet = new THREE.Mesh(
+          new THREE.SphereGeometry(0.2, 6, 6),
+          new THREE.MeshBasicMaterial({ color: 0xffa500 })
+        );
+        const direction = new THREE.Vector3();
+        tank.barrel.getWorldDirection(direction);
+        direction.y = 0;
+        direction.normalize();
+        const startPosition = new THREE.Vector3();
+        tank.barrel.getWorldPosition(startPosition);
+        bullet.position.copy(startPosition);
+        bullet.velocity = direction.clone().multiplyScalar(200);
+        bullet.ownerIndex = playerIndex;
+        bullet.lifespan = 2.0;
+        gameObjects.machineGunBullets.push(bullet);
+        scene.add(bullet);
+        setTimeout(() => {
+          playerState.canFire = true;
+        }, 80); // Fast cooldown
+      }
+
+      function fireMissile(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        if (playerState.powerUpAmmo <= 0) return;
+        playerState.powerUpAmmo--;
+        playerState.canFire = false;
+
+        const tank = playerIndex === 0 ? player1Tank : player2Tank;
+        const missile = new THREE.Group();
+        const body = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.5, 0.5, 3, 12),
+          LAMBERT_MATERIAL(0xcccccc)
+        );
+        const tip = new THREE.Mesh(
+          new THREE.ConeGeometry(0.5, 1, 12),
+          LAMBERT_MATERIAL(0xff0000)
+        );
+        tip.position.y = 1.5;
+        missile.add(body, tip);
+        missile.rotation.x = Math.PI / 2;
+
+        const startPosition = new THREE.Vector3();
+        tank.barrel.getWorldPosition(startPosition);
+        missile.position.copy(startPosition);
+        missile.quaternion.copy(tank.barrel.getWorldQuaternion());
+        missile.ownerIndex = playerIndex;
+        missile.ownerTankType = playerState.tankType;
+        missile.target = playerIndex === 0 ? player2Tank : player1Tank;
+        missile.lifespan = 10;
+        gameObjects.missiles.push(missile);
+        scene.add(missile);
+
+        deactivatePowerUp(playerIndex);
+        setTimeout(() => {
+          playerState.canFire = true;
+        }, 1000); // Cooldown after missile shot
+      }
+
+      function dropMine(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        if (
+          playerState.activePowerUp !== "mines" ||
+          playerState.powerUpAmmo <= 0
+        )
+          return;
+        playerState.powerUpAmmo--;
+
+        const tank = playerIndex === 0 ? player1Tank : player2Tank;
+        const mine = new THREE.Mesh(
+          new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16),
+          LAMBERT_MATERIAL(0x444444)
+        );
+        const minePos = tank.position
+          .clone()
+          .add(new THREE.Vector3(0, 0, 7).applyQuaternion(tank.quaternion));
+        mine.position.set(minePos.x, 0.25, minePos.z);
+        mine.ownerIndex = playerIndex;
+        gameObjects.mines.push(mine);
+        scene.add(mine);
+
+        if (playerState.powerUpAmmo <= 0) {
+          deactivatePowerUp(playerIndex);
+        }
       }
 
       function healPlayer(playerIndex) {
@@ -1447,7 +1574,6 @@
           p.position.add(p.velocity.clone().multiplyScalar(delta));
           let destroyed = false;
 
-          // Sprawdzanie kolizji z czołgami
           const targets = [player1Tank, player2Tank];
           for (const target of targets) {
             const targetState = gameState.players[target.userData.playerIndex];
@@ -1472,7 +1598,6 @@
             continue;
           }
 
-          // Sprawdzanie kolizji z domami
           for (let j = gameObjects.houses.length - 1; j >= 0; j--) {
             const house = gameObjects.houses[j];
             if (p.position.distanceTo(house.position) < 12) {
@@ -1494,7 +1619,6 @@
             continue;
           }
 
-          // Sprawdzanie kolizji z ziemią
           if (p.position.y <= 0.2) {
             createExplosion(p.position, 0.8, true);
             destroyed = true;
@@ -1669,7 +1793,7 @@
                 for (const bridge of gameObjects.bridges) {
                   if (
                     tank.position.distanceTo(bridge.position) <
-                    bridge.geometry.parameters.depth / 2
+                    bridge.geometry.parameters.depth / 1.5
                   ) {
                     onBridge = true;
                     break;
@@ -1685,8 +1809,8 @@
           if (isDrowning) {
             const drownPosition = tank.position.clone();
             drownPosition.y = WATER_LEVEL + 1;
-            createExplosion(drownPosition, 4, false, true); // Eksplozja wodna
-            handleDamage(tank, 9999); // Natychmiastowe zniszczenie
+            createExplosion(drownPosition, 4, false, true);
+            handleDamage(tank, 9999);
           }
         }
       }
@@ -1756,6 +1880,8 @@
           const hpBar = document.getElementById(`hp-bar-${i + 1}`);
           const ammo = document.getElementById(`ammo-value-${i + 1}`);
           const med = document.getElementById(`medkits-value-${i + 1}`);
+          const powerupHUD = document.getElementById(`powerup-hud-${i + 1}`);
+
           if (!hpVal) continue;
           hpVal.innerText = `${Math.max(
             0,
@@ -1766,6 +1892,28 @@
           hpBar.className = `hud-bar-fill ${hpPercent < 30 ? "low" : ""}`;
           ammo.innerText = `${playerState.ammo} / 8`;
           med.innerText = playerState.medkits;
+
+          if (playerState.activePowerUp) {
+            powerupHUD.style.display = "block";
+            let text = "";
+            switch (playerState.activePowerUp) {
+              case "turbo":
+                text = `TURBO: ${playerState.powerUpTimer.toFixed(1)}s`;
+                break;
+              case "machinegun":
+                text = `KARABIN: ${playerState.powerUpTimer.toFixed(1)}s`;
+                break;
+              case "missile":
+                text = `RAKIETA: ${playerState.powerUpAmmo}x`;
+                break;
+              case "mines":
+                text = `MINY: ${playerState.powerUpAmmo}x`;
+                break;
+            }
+            powerupHUD.innerText = text;
+          } else {
+            powerupHUD.style.display = "none";
+          }
         }
       }
       function drawMap() {
@@ -1931,19 +2079,216 @@
         }
       }
 
+      function updateCrateSpawning(delta) {
+        crateSpawnTimer -= delta;
+        if (crateSpawnTimer <= 0) {
+          spawnCrate();
+          crateSpawnTimer = 20.0;
+        }
+      }
+
+      function spawnCrate() {
+        const crate = new THREE.Group();
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(3, 3, 3),
+          LAMBERT_MATERIAL(0xdaa520)
+        );
+        const questionMarkCanvas = document.createElement("canvas");
+        questionMarkCanvas.width = 128;
+        questionMarkCanvas.height = 128;
+        const ctx = questionMarkCanvas.getContext("2d");
+        ctx.fillStyle = "#8B4513";
+        ctx.fillRect(0, 0, 128, 128);
+        ctx.font = "bold 100px Arial";
+        ctx.fillStyle = "yellow";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("?", 64, 64);
+        const qmTexture = new THREE.CanvasTexture(questionMarkCanvas);
+        box.material = new THREE.MeshLambertMaterial({ map: qmTexture });
+
+        const parachute = new THREE.Mesh(
+          new THREE.SphereGeometry(6, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+          LAMBERT_MATERIAL(0xeeeeee)
+        );
+        parachute.position.y = 5;
+        crate.add(box, parachute);
+        crate.position.set(
+          (Math.random() - 0.5) * (MAP_SIZE - 40),
+          150,
+          (Math.random() - 0.5) * (MAP_SIZE - 40)
+        );
+        crate.userData.powerUpType =
+          POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+        crate.userData.parachute = parachute;
+        gameObjects.crates.push(crate);
+        scene.add(crate);
+      }
+
+      function updateCrates(delta) {
+        const tanks = [player1Tank, player2Tank];
+        for (let i = gameObjects.crates.length - 1; i >= 0; i--) {
+          const crate = gameObjects.crates[i];
+          if (crate.position.y > 1.5) {
+            crate.position.y -= 20 * delta;
+          } else {
+            crate.position.y = 1.5;
+            if (crate.userData.parachute) {
+              crate.remove(crate.userData.parachute);
+              crate.userData.parachute = null;
+            }
+          }
+
+          for (const tank of tanks) {
+            if (
+              !gameState.players[tank.userData.playerIndex].isDestroyed &&
+              tank.position.distanceTo(crate.position) < 5
+            ) {
+              activatePowerUp(
+                tank.userData.playerIndex,
+                crate.userData.powerUpType
+              );
+              scene.remove(crate);
+              gameObjects.crates.splice(i, 1);
+              break;
+            }
+          }
+        }
+      }
+
+      function activatePowerUp(playerIndex, type) {
+        const playerState = gameState.players[playerIndex];
+        playerState.activePowerUp = type;
+        switch (type) {
+          case "turbo":
+            playerState.powerUpTimer = 10;
+            break;
+          case "machinegun":
+            playerState.powerUpTimer = 15;
+            break;
+          case "missile":
+            playerState.powerUpAmmo = 1;
+            break;
+          case "mines":
+            playerState.powerUpAmmo = 5;
+            break;
+        }
+      }
+
+      function deactivatePowerUp(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        playerState.activePowerUp = null;
+        playerState.powerUpTimer = 0;
+        playerState.powerUpAmmo = 0;
+      }
+
+      function updatePowerUps(delta) {
+        for (let i = 0; i < 2; i++) {
+          const playerState = gameState.players[i];
+          if (playerState.powerUpTimer > 0) {
+            playerState.powerUpTimer -= delta;
+            if (playerState.powerUpTimer <= 0) {
+              deactivatePowerUp(i);
+            }
+          }
+        }
+      }
+
+      function updateSpecialProjectiles(delta) {
+        // Update Machine Gun Bullets
+        for (let i = gameObjects.machineGunBullets.length - 1; i >= 0; i--) {
+          const b = gameObjects.machineGunBullets[i];
+          b.position.add(b.velocity.clone().multiplyScalar(delta));
+          b.lifespan -= delta;
+          let hit = false;
+          const otherTank = b.ownerIndex === 0 ? player2Tank : player1Tank;
+          if (
+            !gameState.players[otherTank.userData.playerIndex].isDestroyed &&
+            b.position.distanceTo(otherTank.position) < 5
+          ) {
+            handleDamage(otherTank, 3); // Niskie obrażenia
+            hit = true;
+          }
+          if (hit || b.lifespan <= 0) {
+            scene.remove(b);
+            gameObjects.machineGunBullets.splice(i, 1);
+          }
+        }
+
+        // Update Missiles
+        for (let i = gameObjects.missiles.length - 1; i >= 0; i--) {
+          const m = gameObjects.missiles[i];
+          const target = m.target;
+          m.lifespan -= delta;
+
+          if (
+            !gameState.players[target.userData.playerIndex].isDestroyed &&
+            m.lifespan > 0
+          ) {
+            const direction = new THREE.Vector3()
+              .subVectors(target.position, m.position)
+              .normalize();
+            m.quaternion.slerp(
+              new THREE.Quaternion().setFromUnitVectors(
+                new THREE.Vector3(0, 1, 0),
+                direction
+              ),
+              0.08
+            );
+            m.position.add(direction.multiplyScalar(60 * delta));
+
+            if (m.position.distanceTo(target.position) < 5) {
+              const damage = TANKS_DATA[m.ownerTankType].stats.damage * 2;
+              handleDamage(target, damage);
+              createExplosion(m.position, 4);
+              scene.remove(m);
+              gameObjects.missiles.splice(i, 1);
+            }
+          } else {
+            // Cel zniszczony lub czas życia upłynął
+            createExplosion(m.position, 2);
+            scene.remove(m);
+            gameObjects.missiles.splice(i, 1);
+          }
+        }
+
+        // Update Mines
+        const tanks = [player1Tank, player2Tank];
+        for (let i = gameObjects.mines.length - 1; i >= 0; i--) {
+          const mine = gameObjects.mines[i];
+          for (const tank of tanks) {
+            if (
+              mine.ownerIndex !== tank.userData.playerIndex &&
+              !gameState.players[tank.userData.playerIndex].isDestroyed &&
+              tank.position.distanceTo(mine.position) < 3
+            ) {
+              handleDamage(tank, 50);
+              createExplosion(mine.position, 4);
+              scene.remove(mine);
+              gameObjects.mines.splice(i, 1);
+              break;
+            }
+          }
+        }
+      }
+
       function animate() {
         requestAnimationFrame(animate);
         if (!gameState.gameStarted) return;
         const delta = clock.getDelta();
         if (!gameState.paused) {
+          updateCrateSpawning(delta);
           handleControls(delta);
           updateProjectiles(delta);
+          updateSpecialProjectiles(delta);
           updateParticles(delta);
           updateWreckage(delta);
           checkRespawns(delta);
           checkDrowning();
           checkFenceCollisions();
           checkToiletCollisions();
+          updateCrates(delta);
+          updatePowerUps(delta);
           updateBubbles();
 
           const offset = new THREE.Vector3(0, 20, 35);
