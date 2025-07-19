@@ -419,7 +419,7 @@
       let camera1, camera2;
       let player1Tank, player2Tank;
       let selectionRenderers = [];
-      let crateSpawnTimer = 20.0;
+      let crateSpawnTimer = 5.0; // Initial delay for the first crate
 
       const keys = {};
       const gameObjects = {
@@ -1271,21 +1271,38 @@
         mainWater.position.y = WATER_LEVEL;
         scene.add(mainWater);
 
-        // --- Rzeka ---
-        const riverGeom = new THREE.PlaneGeometry(30, MAP_SIZE * 1.2);
+        const RIVER_X = 80;
+        const RIVER_WIDTH = 40;
+
+        // --- Dno rzeki (dla wizualnego efektu głębi) ---
+        const riverBedGeom = new THREE.PlaneGeometry(
+          RIVER_WIDTH,
+          MAP_SIZE * 1.2
+        );
+        const riverBedMaterial = new THREE.MeshLambertMaterial({
+          color: 0x4a4230,
+        }); // Ciemny, błotnisty kolor
+        const riverBed = new THREE.Mesh(riverBedGeom, riverBedMaterial);
+        riverBed.rotation.x = -Math.PI / 2;
+        riverBed.position.set(RIVER_X, WATER_LEVEL - 0.2, 0);
+        scene.add(riverBed);
+
+        // --- Rzeka (płaszczyzna wody) ---
+        const riverGeom = new THREE.PlaneGeometry(RIVER_WIDTH, MAP_SIZE * 1.2);
         const river = new THREE.Mesh(riverGeom, waterMaterial);
         river.rotation.x = -Math.PI / 2;
-        river.position.y = WATER_LEVEL + 0.1;
-        river.position.x = 80;
+        river.position.y = WATER_LEVEL + 0.1; // Nieco wyżej niż dno oceanu
+        river.position.x = RIVER_X;
         scene.add(river);
         gameObjects.rivers.push({
-          x: 80,
+          x: RIVER_X,
           z: 0,
-          width: 30,
+          width: RIVER_WIDTH,
           length: MAP_SIZE * 1.2,
         });
-        createBridge(new THREE.Vector3(80, 0, 50), 30, 0);
-        createBridge(new THREE.Vector3(80, 0, -100), 30, 0);
+
+        createBridge(new THREE.Vector3(RIVER_X, 0, 50), RIVER_WIDTH, 0);
+        createBridge(new THREE.Vector3(RIVER_X, 0, -100), RIVER_WIDTH, 0);
 
         // --- Domy ---
         for (let i = 0; i < 5; i++) {
@@ -1297,7 +1314,7 @@
           );
           if (
             house.position.distanceTo(new THREE.Vector3(0, 0, 0)) < 50 ||
-            Math.abs(house.position.x - 80) < 30
+            Math.abs(house.position.x - RIVER_X) < RIVER_WIDTH
           ) {
             i--; // Spróbuj ponownie, jeśli wylosowano pozycję na środku lub na rzece
             continue;
@@ -1653,8 +1670,27 @@
         }
       }
 
+      function drownTank(tank) {
+        const playerIndex = tank.userData.playerIndex;
+        const playerState = gameState.players[playerIndex];
+        if (playerState.isDestroyed) return;
+
+        const drownPosition = tank.position.clone();
+        drownPosition.y = WATER_LEVEL + 1;
+        createExplosion(drownPosition, 4, false, true); // Tylko eksplozja wodna
+
+        tank.visible = false;
+
+        const winnerIndex = playerIndex === 0 ? 1 : 0;
+        if (winnerIndex === 0) gameState.scores.player1++;
+        else gameState.scores.player2++;
+
+        playerState.isDestroyed = true;
+        playerState.respawnTimer = 3.0;
+      }
+
       function destroyTank(tank) {
-        createExplosion(tank.position, 4);
+        createExplosion(tank.position, 4); // Ognista eksplozja
         tank.visible = false;
         const partsToDestroy = [tank.hullGroup, tank.turret];
         partsToDestroy.forEach((part) => {
@@ -1807,10 +1843,7 @@
           }
 
           if (isDrowning) {
-            const drownPosition = tank.position.clone();
-            drownPosition.y = WATER_LEVEL + 1;
-            createExplosion(drownPosition, 4, false, true);
-            handleDamage(tank, 9999);
+            drownTank(tank);
           }
         }
       }
@@ -1959,6 +1992,18 @@
           );
         });
 
+        // Skrzynie z zaopatrzeniem
+        ctx.fillStyle = "#FF00FF"; // Magenta
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        gameObjects.crates.forEach((crate) => {
+          const x = mapX(crate.position.x);
+          const z = mapZ(crate.position.z);
+          ctx.fillRect(x - 4, z - 4, 8, 8);
+          ctx.fillText("?", x, z);
+        });
+
         // Toalety
         ctx.fillStyle = "yellow";
         ctx.font = "bold 10px sans-serif";
@@ -2080,15 +2125,16 @@
       }
 
       function updateCrateSpawning(delta) {
-        crateSpawnTimer -= delta;
-        if (crateSpawnTimer <= 0) {
-          spawnCrate();
-          crateSpawnTimer = 20.0;
+        if (gameObjects.crates.length < 3) {
+          crateSpawnTimer -= delta;
+          if (crateSpawnTimer <= 0) {
+            spawnCrate();
+            crateSpawnTimer = 10.0; // Czas do następnego potencjalnego spawnu
+          }
         }
       }
 
       function spawnCrate() {
-        const crate = new THREE.Group();
         const box = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3));
         const questionMarkCanvas = document.createElement("canvas");
         questionMarkCanvas.width = 128;
@@ -2100,63 +2146,34 @@
         ctx.fillStyle = "yellow";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("?", 64, 64);
+        ctx.fillText("?", 64, 74);
         const qmTexture = new THREE.CanvasTexture(questionMarkCanvas);
         box.material = new THREE.MeshLambertMaterial({ map: qmTexture });
 
-        const parachute = new THREE.Mesh(
-          new THREE.SphereGeometry(6, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-          LAMBERT_MATERIAL(0xeeeeee)
-        );
-        parachute.position.y = 5;
+        let spawnX, spawnZ, validPosition;
+        do {
+          validPosition = true;
+          spawnX = (Math.random() - 0.5) * (MAP_SIZE - 40);
+          spawnZ = (Math.random() - 0.5) * (MAP_SIZE - 40);
+          // Sprawdź, czy nie spawnuje się na rzece
+          for (const river of gameObjects.rivers) {
+            if (Math.abs(spawnX - river.x) < river.width / 2) {
+              validPosition = false;
+              break;
+            }
+          }
+        } while (!validPosition);
 
-        // Sznurki do spadochronu
-        const points = [];
-        points.push(new THREE.Vector3(-3, 5, -3));
-        points.push(new THREE.Vector3(-1.5, 1.5, -1.5));
-        points.push(new THREE.Vector3(3, 5, -3));
-        points.push(new THREE.Vector3(1.5, 1.5, -1.5));
-        points.push(new THREE.Vector3(-3, 5, 3));
-        points.push(new THREE.Vector3(-1.5, 1.5, 1.5));
-        points.push(new THREE.Vector3(3, 5, 3));
-        points.push(new THREE.Vector3(1.5, 1.5, 1.5));
-        const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
-        const lines = new THREE.LineSegments(
-          lineGeom,
-          new THREE.LineBasicMaterial({ color: 0x555555 })
-        );
-
-        crate.add(box, parachute, lines);
-
-        const spawnX = (Math.random() - 0.5) * (MAP_SIZE - 40);
-        const spawnZ = (Math.random() - 0.5) * (MAP_SIZE - 40);
-        crate.position.set(spawnX, 150, spawnZ);
-
-        // Cień/wskaźnik lądowania
-        const shadow = new THREE.Mesh(
-          new THREE.CircleGeometry(5, 32),
-          new THREE.MeshBasicMaterial({
-            color: 0x000000,
-            transparent: true,
-            opacity: 0.4,
-          })
-        );
-        shadow.rotation.x = -Math.PI / 2;
-        shadow.position.set(spawnX, 0.1, spawnZ);
-        scene.add(shadow);
-
-        crate.userData.powerUpType =
+        box.position.set(spawnX, 1.5, spawnZ);
+        box.userData.powerUpType =
           POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
-        crate.userData.parachute = parachute;
-        crate.userData.lines = lines;
-        crate.userData.shadow = shadow;
 
-        gameObjects.crates.push(crate);
-        scene.add(crate);
+        gameObjects.crates.push(box);
+        scene.add(box);
 
         console.log(
           `Pojawiła się skrzynia z mocą: ${
-            crate.userData.powerUpType
+            box.userData.powerUpType
           } na pozycji X:${spawnX.toFixed(0)}, Z:${spawnZ.toFixed(0)}`
         );
       }
@@ -2165,16 +2182,7 @@
         const tanks = [player1Tank, player2Tank];
         for (let i = gameObjects.crates.length - 1; i >= 0; i--) {
           const crate = gameObjects.crates[i];
-          if (crate.position.y > 1.5) {
-            crate.position.y -= 20 * delta;
-          } else {
-            crate.position.y = 1.5;
-            if (crate.userData.parachute) {
-              crate.remove(crate.userData.parachute);
-              crate.remove(crate.userData.lines);
-              crate.userData.parachute = null;
-            }
-          }
+          crate.rotation.y += 0.5 * delta;
 
           for (const tank of tanks) {
             if (
@@ -2186,8 +2194,8 @@
                 crate.userData.powerUpType
               );
               scene.remove(crate);
-              scene.remove(crate.userData.shadow);
               gameObjects.crates.splice(i, 1);
+              crateSpawnTimer = 1.0; // Przyspiesz pojawienie się kolejnej skrzyni
               break;
             }
           }
@@ -2268,15 +2276,16 @@
             const direction = new THREE.Vector3()
               .subVectors(target.position, m.position)
               .normalize();
-            m.quaternion.slerp(
-              new THREE.Quaternion().setFromUnitVectors(
-                new THREE.Vector3(0, 0, 1),
-                direction
-              ),
-              0.08
+
+            const targetQuaternion = new THREE.Quaternion();
+            targetQuaternion.setFromUnitVectors(
+              new THREE.Vector3(0, 1, 0),
+              direction
             );
+            m.quaternion.slerp(targetQuaternion, 0.08);
+
             m.position.add(
-              new THREE.Vector3(0, 0, 1)
+              new THREE.Vector3(0, 1, 0)
                 .applyQuaternion(m.quaternion)
                 .multiplyScalar(60 * delta)
             );
@@ -2289,7 +2298,6 @@
               gameObjects.missiles.splice(i, 1);
             }
           } else {
-            // Cel zniszczony lub czas życia upłynął
             createExplosion(m.position, 2);
             scene.remove(m);
             gameObjects.missiles.splice(i, 1);
