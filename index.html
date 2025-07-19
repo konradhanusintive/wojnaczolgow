@@ -209,6 +209,56 @@
       #message-display {
         bottom: 150px;
       }
+      .respawn-message {
+        position: absolute;
+        width: 50%;
+        top: 40%;
+        font-size: 3em;
+        color: #ff4500;
+        text-shadow: 3px 3px 6px #000;
+        animation: pop 1s infinite;
+        z-index: 60;
+      }
+      #respawn-message-1 {
+        left: 0;
+      }
+      #respawn-message-2 {
+        right: 0;
+      }
+      @keyframes pop {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.1);
+        }
+      }
+      .speech-bubble {
+        position: absolute;
+        background: rgba(255, 255, 255, 0.9);
+        color: #000;
+        padding: 10px 15px;
+        border-radius: 15px;
+        font-family: "Comic Sans MS", cursive, sans-serif;
+        font-size: 1em;
+        max-width: 200px;
+        text-align: center;
+        transform: translate(-50%, -120%); /* Center above the point */
+        z-index: 30;
+        border: 2px solid #333;
+      }
+      .speech-bubble::after {
+        content: "";
+        position: absolute;
+        bottom: -15px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-width: 15px 15px 0;
+        border-style: solid;
+        border-color: rgba(255, 255, 255, 0.9) transparent transparent
+          transparent;
+      }
     </style>
   </head>
   <body>
@@ -319,6 +369,18 @@
     <div id="hud-left" class="hud"></div>
     <div id="hud-right" class="hud"></div>
     <div id="message-display" class="message"></div>
+    <div
+      id="respawn-message-1"
+      class="respawn-message"
+      style="display: none"
+    ></div>
+    <div
+      id="respawn-message-2"
+      class="respawn-message"
+      style="display: none"
+    ></div>
+    <div id="bubble-1" class="speech-bubble" style="display: none"></div>
+    <div id="bubble-2" class="speech-bubble" style="display: none"></div>
     <div id="menu" class="overlay" style="display: none">
       <h1>PAUZA</h1>
       <p>Naciśnij ESC</p>
@@ -359,6 +421,8 @@
         wreckage: [],
       };
       const MAP_SIZE = 500;
+      const WATER_LEVEL = -0.5;
+      const DROWN_LEVEL = -1.5;
 
       const TANKS_DATA = {
         pl01: {
@@ -377,6 +441,20 @@
           create: createStandardTank,
         },
       };
+
+      const TANK_QUOTES = [
+        "Jedziesz, pociśnij go!",
+        "Trafiony... ale nie zatopiony!",
+        "Ser, czy pleśń?",
+        "Mam Cię na celowniku!",
+        "Ktoś zamawiał pizzę z ołowiem?",
+        "Czy to czołg w twojej kieszeni?",
+        "Auć, to bolało!",
+        "Potrzebuję wsparcia! Albo kawy.",
+        "Zaraz wracam, muszę przeładować.",
+        "Bum! I po strachu.",
+        "Czujesz ten zapach? To zapach zwycięstwa.",
+      ];
 
       const gameState = {
         gameStarted: false,
@@ -480,30 +558,42 @@
         return texture;
       }
 
-      function createExplosion(position, scale, isDust = false) {
-        const particleCount = isDust ? 10 : 15;
+      function createExplosion(
+        position,
+        scale,
+        isDust = false,
+        isWater = false
+      ) {
+        const particleCount = isDust || isWater ? 15 : 20;
         for (let i = 0; i < particleCount * scale; i++) {
+          let color;
+          if (isWater) {
+            color = Math.random() > 0.5 ? 0xadd8e6 : 0x87ceeb;
+          } else if (isDust) {
+            color = 0x966932;
+          } else {
+            color = Math.random() > 0.5 ? 0xffa500 : 0xff4500;
+          }
+
           const particle = new THREE.Mesh(
             new THREE.SphereGeometry(0.2 * scale, 4, 4),
             new THREE.MeshBasicMaterial({
-              color: isDust
-                ? 0x966932
-                : Math.random() > 0.5
-                ? 0xffa500
-                : 0xff4500,
+              color: color,
               transparent: true,
-              opacity: isDust ? 0.6 : 1.0,
+              opacity: isDust || isWater ? 0.7 : 1.0,
             })
           );
           particle.position.copy(position);
           particle.velocity = new THREE.Vector3(
             Math.random() - 0.5,
-            isDust ? Math.random() * 0.5 : Math.random(),
+            isWater ? Math.random() * 0.8 : Math.random(),
             Math.random() - 0.5
           )
             .normalize()
-            .multiplyScalar(Math.random() * (isDust ? 5 : 20) * scale);
-          particle.lifespan = Math.random() * 0.6 + 0.2;
+            .multiplyScalar(
+              Math.random() * (isDust || isWater ? 8 : 20) * scale
+            );
+          particle.lifespan = Math.random() * 0.8 + 0.3;
           gameObjects.particles.push(particle);
           scene.add(particle);
         }
@@ -851,6 +941,7 @@
               gameState.players[1].tankType = tankType;
               gameState.selectionComplete = true;
               document.getElementById("start-screen").style.display = "none";
+              selectionRenderers.forEach(({ renderer }) => renderer.dispose());
               selectionRenderers = [];
               initGame();
             }
@@ -950,6 +1041,9 @@
         updateHUD();
         setupEventListeners();
         createScenery();
+        // Start random quotes
+        setInterval(() => showTankQuote(0), 12000 + Math.random() * 6000);
+        setInterval(() => showTankQuote(1), 12000 + Math.random() * 6000);
         animate();
       }
 
@@ -995,7 +1089,6 @@
         });
       }
 
-      // --- PRZYWRÓCONA I ULEPSZONA FUNKCJA TWORZENIA SCENERII ---
       function createScenery() {
         const ground = new THREE.Mesh(
           new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE),
@@ -1016,7 +1109,7 @@
         });
         const water = new THREE.Mesh(waterGeometry, waterMaterial);
         water.rotation.x = -Math.PI / 2;
-        water.position.y = -0.5;
+        water.position.y = WATER_LEVEL;
         scene.add(water);
 
         const createCactus = () => {
@@ -1187,6 +1280,22 @@
           playerState.canFire = true;
         }, 500);
       }
+
+      function healPlayer(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        const maxHealth = TANKS_DATA[playerState.tankType].stats.hp;
+        if (
+          playerState.medkits > 0 &&
+          playerState.health > 0 &&
+          playerState.health < maxHealth
+        ) {
+          playerState.medkits--;
+          playerState.health += 40;
+          playerState.health = Math.min(playerState.health, maxHealth);
+          updateHUD();
+        }
+      }
+
       function updateProjectiles(delta) {
         for (let i = gameObjects.projectiles.length - 1; i >= 0; i--) {
           const p = gameObjects.projectiles[i];
@@ -1233,6 +1342,12 @@
           playerState.isDestroyed = true;
           playerState.respawnTimer = 3.0;
           destroyTank(target);
+          showTankQuote(playerIndex); // show quote on death
+        } else {
+          // Show quote on getting hit
+          if (Math.random() > 0.6) {
+            showTankQuote(playerIndex);
+          }
         }
       }
       function destroyTank(tank) {
@@ -1293,21 +1408,44 @@
       function checkRespawns(delta) {
         for (let i = 0; i < 2; i++) {
           const playerState = gameState.players[i];
+          const respawnMsgEl = document.getElementById(
+            `respawn-message-${i + 1}`
+          );
           if (playerState.isDestroyed) {
             playerState.respawnTimer -= delta;
+            respawnMsgEl.style.display = "block";
+            respawnMsgEl.innerText = `ODRODZENIE ZA: ${Math.ceil(
+              Math.max(0, playerState.respawnTimer)
+            )}`;
+
             if (playerState.respawnTimer <= 0) {
               respawnPlayer(i);
+              respawnMsgEl.style.display = "none";
             }
           }
         }
       }
+
+      function checkDrowning() {
+        const tanks = [player1Tank, player2Tank];
+        for (let i = 0; i < 2; i++) {
+          const tank = tanks[i];
+          const playerState = gameState.players[i];
+          if (!playerState.isDestroyed && tank.position.y < DROWN_LEVEL) {
+            createExplosion(tank.position, 4, false, true); // Water explosion
+            handleDamage(tank, 9999); // Instantly destroy
+          }
+        }
+      }
+
       function respawnPlayer(playerIndex) {
         const playerState = gameState.players[playerIndex];
         const tank = playerIndex === 0 ? player1Tank : player2Tank;
+        const startY = TANKS_DATA[playerState.tankType].create(0).position.y;
         const startPosition =
           playerIndex === 0
-            ? new THREE.Vector3(-20, tank.position.y, 0)
-            : new THREE.Vector3(20, tank.position.y, 0);
+            ? new THREE.Vector3(-20, startY, 0)
+            : new THREE.Vector3(20, startY, 0);
         playerState.health = TANKS_DATA[playerState.tankType].stats.hp;
         playerState.ammo = 8;
         playerState.isDestroyed = false;
@@ -1348,6 +1486,19 @@
         ctx.fillRect(0, 0, w, h);
         const mapX = (x) => (x / MAP_SIZE) * w + w / 2;
         const mapZ = (z) => (z / MAP_SIZE) * h + h / 2;
+
+        // Draw toilets
+        ctx.fillStyle = "yellow";
+        gameObjects.toilets.forEach((toilet) => {
+          ctx.fillRect(
+            mapX(toilet.position.x) - 3,
+            mapZ(toilet.position.z) - 3,
+            6,
+            6
+          );
+        });
+
+        // Draw players
         if (!gameState.players[0].isDestroyed) {
           ctx.fillStyle = "#38A849";
           ctx.beginPath();
@@ -1394,6 +1545,7 @@
         }
       }
       function updateParticles(delta) {
+        const gravity = -9.8;
         for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
           const p = gameObjects.particles[i];
           p.lifespan -= delta;
@@ -1403,11 +1555,74 @@
             p.material.dispose();
             gameObjects.particles.splice(i, 1);
           } else {
+            p.velocity.y += gravity * delta;
             p.position.add(p.velocity.clone().multiplyScalar(delta));
             p.scale.multiplyScalar(0.97);
             if (p.material.transparent)
-              p.material.opacity = (p.lifespan / 0.5) * 0.5;
+              p.material.opacity = (p.lifespan / 0.8) * 0.7;
           }
+        }
+      }
+
+      function showTankQuote(playerIndex) {
+        if (gameState.players[playerIndex].isDestroyed) return;
+        const bubble = document.getElementById(`bubble-${playerIndex + 1}`);
+        bubble.innerText =
+          TANK_QUOTES[Math.floor(Math.random() * TANK_QUOTES.length)];
+        bubble.style.display = "block";
+        setTimeout(() => {
+          bubble.style.display = "none";
+        }, 4000);
+      }
+
+      function updateBubbles() {
+        const tanks = [player1Tank, player2Tank];
+        const cameras = [camera1, camera2];
+        const viewports = [
+          {
+            left: 0,
+            width: window.innerWidth / 2,
+          },
+          {
+            left: window.innerWidth / 2,
+            width: window.innerWidth / 2,
+          },
+        ];
+
+        // Update bubble for Player 1
+        const bubble1 = document.getElementById("bubble-1");
+        if (bubble1.style.display !== "none" && player1Tank) {
+          const vector = new THREE.Vector3(
+            player1Tank.position.x,
+            player1Tank.position.y + 6,
+            player1Tank.position.z
+          );
+          vector.project(camera1); // Project on its own camera for best accuracy on its screen
+          const x =
+            (vector.x * viewports[0].width) / 2 + viewports[0].width / 2;
+          const y =
+            -(vector.y * window.innerHeight) / 2 + window.innerHeight / 2;
+          bubble1.style.left = `${x}px`;
+          bubble1.style.top = `${y}px`;
+        }
+
+        // Update bubble for Player 2
+        const bubble2 = document.getElementById("bubble-2");
+        if (bubble2.style.display !== "none" && player2Tank) {
+          const vector = new THREE.Vector3(
+            player2Tank.position.x,
+            player2Tank.position.y + 6,
+            player2Tank.position.z
+          );
+          vector.project(camera2); // Project on its own camera
+          const x =
+            (vector.x * viewports[1].width) / 2 +
+            viewports[1].left +
+            viewports[1].width / 2;
+          const y =
+            -(vector.y * window.innerHeight) / 2 + window.innerHeight / 2;
+          bubble2.style.left = `${x}px`;
+          bubble2.style.top = `${y}px`;
         }
       }
 
@@ -1422,6 +1637,8 @@
           updateWreckage(delta);
           checkRespawns(delta);
           checkToiletCollisions();
+          checkDrowning();
+          updateBubbles();
 
           const offset = new THREE.Vector3(0, 20, 35);
           if (player1Tank) {
