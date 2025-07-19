@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wojna Czołgów 3D - Edycja Realistyczna</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #000;
+      }
+      canvas {
+        display: block;
+      }
+      .hud {
+        position: absolute;
+        bottom: 20px;
+        color: white;
+        font-family: "Consolas", "Lucida Console", monospace;
+        font-size: 1.1em;
+        background-color: rgba(0, 0, 0, 0.6);
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        min-width: 260px;
+        box-sizing: border-box;
+        z-index: 10;
+      }
+      #hud-left {
+        left: 20px;
+      }
+      #hud-right {
+        right: 20px;
+      }
+      .hud-line {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+      }
+      .hud-bar {
+        background: #555;
+        border-radius: 5px;
+        overflow: hidden;
+        height: 20px;
+        border: 1px solid #888;
+      }
+      .hud-bar-fill {
+        background: #28a745;
+        width: 100%;
+        height: 100%;
+        transition: width 0.5s;
+      }
+      .hud-bar-fill.low {
+        background: #dc3545;
+      }
+      .message {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #ffc107;
+        font-size: 2em;
+        font-family: "Arial Black", sans-serif;
+        text-shadow: 2px 2px 4px #000;
+        display: none;
+        text-align: center;
+        z-index: 20;
+      }
+      #message-display {
+        bottom: 150px;
+      }
+      #game-over-message {
+        top: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 3em;
+        display: none;
+      }
+      .overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.85);
+        color: white;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        font-family: sans-serif;
+        text-align: center;
+        z-index: 50;
+      }
+      #start-screen h2 {
+        color: #ffc107;
+      }
+      .controls-container {
+        display: flex;
+        justify-content: space-around;
+        width: 80%;
+        max-width: 900px;
+        margin-top: 20px;
+      }
+      .controls-column {
+        padding: 20px;
+        border: 1px solid #555;
+        border-radius: 10px;
+        background-color: rgba(0, 0, 0, 0.3);
+      }
+      .controls-column ul {
+        list-style: none;
+        padding: 0;
+        text-align: left;
+      }
+      .controls-column li {
+        margin-bottom: 10px;
+        font-size: 0.8em;
+      }
+      .key {
+        display: inline-block;
+        padding: 5px 10px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background: #333;
+        color: #fff;
+        min-width: 20px;
+        text-align: center;
+        margin-right: 10px;
+      }
+      #map-container {
+        border: 2px solid white;
+        background: rgba(0, 20, 0, 0.7);
+      }
+      #webgl-error {
+        display: none;
+        padding: 20px;
+        line-height: 1.5;
+      }
+      .speech-bubble {
+        position: absolute;
+        background: rgba(255, 255, 255, 0.9);
+        color: black;
+        padding: 10px 15px;
+        border-radius: 15px;
+        font-family: "Arial", sans-serif;
+        font-size: 1em;
+        max-width: 200px;
+        text-align: center;
+        display: none;
+        transform: translate(-50%, -130%); /* Pozycja nad czołgiem */
+        z-index: 100;
+        box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
+        transition: opacity 0.3s;
+      }
+      .speech-bubble::after {
+        /* Strzałka dymku */
+        content: "";
+        position: absolute;
+        bottom: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 10px solid transparent;
+        border-right: 10px solid transparent;
+        border-top: 10px solid rgba(255, 255, 255, 0.9);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="webgl-error" class="overlay">
+      <h2>Błąd renderowania grafiki 3D</h2>
+      <p>
+        Twoja przeglądarka lub karta graficzna nie wspiera technologii WebGL.
+      </p>
+    </div>
+
+    <div id="hud-left" class="hud"></div>
+    <div id="hud-right" class="hud"></div>
+    <div id="message-display" class="message"></div>
+    <div id="game-over-message" class="message"></div>
+    <div id="menu" class="overlay" style="display: none">
+      <h1>PAUZA</h1>
+      <p>Naciśnij ESC, aby wrócić do gry</p>
+    </div>
+    <div id="map-overlay" class="overlay" style="display: none">
+      <h1>MAPA</h1>
+      <canvas id="map-container" width="400" height="400"></canvas>
+      <p>Naciśnij M, aby wrócić</p>
+    </div>
+
+    <div id="speech-bubble-1" class="speech-bubble"></div>
+    <div id="speech-bubble-2" class="speech-bubble"></div>
+
+    <div id="start-screen" class="overlay">
+      <img
+        src="Logo.png"
+        alt="Logo Gry Wojna Czołgów"
+        style="
+          max-width: 500px;
+          width: 90%;
+          height: auto;
+          border-radius: 15px;
+          margin-bottom: 10px;
+          border: 3px solid #444;
+        "
+      />
+      <div class="controls-container">
+        <div class="controls-column">
+          <h2>Gracz 1</h2>
+          <ul>
+            <li>
+              <span class="key">W</span><span class="key">S</span
+              ><span class="key">A</span><span class="key">D</span> - Ruch
+            </li>
+            <li>
+              <span class="key">Q</span><span class="key">E</span> - Obrót wieży
+            </li>
+            <li>
+              <span class="key">F</span><span class="key">V</span> - Lufa
+              góra/dół
+            </li>
+            <li><span class="key">Spacja</span> - Strzał</li>
+          </ul>
+        </div>
+        <div class="controls-column">
+          <h2>Gracz 2</h2>
+          <ul>
+            <li>
+              <span class="key">↑</span><span class="key">↓</span
+              ><span class="key">←</span><span class="key">→</span> - Ruch
+            </li>
+            <li>
+              <span class="key">[</span><span class="key">]</span> - Obrót wieży
+            </li>
+            <li>
+              <span class="key">;</span><span class="key">'</span> - Lufa
+              góra/dół
+            </li>
+            <li><span class="key">Enter</span> - Strzał</li>
+          </ul>
+        </div>
+      </div>
+      <h2 style="margin-top: 40px">Naciśnij dowolny klawisz, aby rozpocząć</h2>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      // --- NOWY IMPORT: ConvexGeometry do tworzenia fasetowanej wieży ---
+      import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
+
+      let scene, renderer, clock;
+      let camera1, camera2;
+      let player1Tank, player2Tank;
+      let bubble1, bubble2;
+
+      const PROJECTILE_SPEED = 160;
+      const GRAVITY = 0;
+
+      const TANK_STATS = {
+        maxHealth: 100,
+        clipSize: 8,
+        reloadTime: 3000,
+        maxMedkits: 3,
+        healAmount: 30,
+      };
+      const keys = {};
+      const gameObjects = { projectiles: [], particles: [], toilets: [] };
+      const MAP_SIZE = 500;
+
+      const gameState = {
+        gameStarted: false,
+        paused: false,
+        gameOver: false,
+        players: [
+          {
+            health: TANK_STATS.maxHealth,
+            ammo: TANK_STATS.clipSize,
+            medkits: TANK_STATS.maxMedkits,
+            isReloading: false,
+            canFire: true,
+            fireCooldown: 500,
+          },
+          {
+            health: TANK_STATS.maxHealth,
+            ammo: TANK_STATS.clipSize,
+            medkits: TANK_STATS.maxMedkits,
+            isReloading: false,
+            canFire: true,
+            fireCooldown: 500,
+          },
+        ],
+      };
+
+      const funnyMessages = [
+        "Proszę się nie śmiać z naszego wyglądu, czujemy się urażone.",
+        "Czy ta gąsienica sprawia, że wyglądam grubo?",
+        "Właśnie wyszedłem z myjni. Lśnię, co nie?",
+        "Strzelaj, ale najpierw powiedz komplement.",
+        "Mój mechanik mówił, że jestem unikatem.",
+        "Ostrożnie, świeżo malowany!",
+        "To nie rdza, to artystyczny nalot.",
+        "Czy wiesz, że czołgi też mają uczucia?",
+        "Mam nadzieję, że mój pancerz jest dziś w modzie.",
+        "Gdybym miał ręce, pomachałbym ci lufą.",
+      ];
+      let speechBubbleCooldown = 5;
+      const SPEECH_BUBBLE_DURATION = 6;
+
+      const CONTROLS = [
+        {
+          fwd: "KeyW",
+          back: "KeyS",
+          left: "KeyA",
+          right: "KeyD",
+          tLeft: "KeyQ",
+          tRight: "KeyE",
+          tUp: "KeyF",
+          tDown: "KeyV",
+          fire: "Space",
+          reload: "KeyR",
+          heal: "KeyB",
+        },
+        {
+          fwd: "ArrowUp",
+          back: "ArrowDown",
+          left: "ArrowLeft",
+          right: "ArrowRight",
+          tLeft: "BracketLeft",
+          tRight: "BracketRight",
+          tUp: "Semicolon",
+          tDown: "Quote",
+          fire: "Enter",
+          reload: "Numpad1",
+          heal: "Numpad2",
+        },
+      ];
+
+      function initGame() {
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        if (!renderer.getContext()) {
+          document.getElementById("webgl-error").style.display = "flex";
+          return;
+        }
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setScissorTest(true);
+        document.body.appendChild(renderer.domElement);
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+        scene.fog = new THREE.Fog(0x87ceeb, 200, 450);
+
+        camera1 = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / 2 / window.innerHeight,
+          0.1,
+          1000
+        );
+        camera2 = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / 2 / window.innerHeight,
+          0.1,
+          1000
+        );
+        clock = new THREE.Clock();
+
+        bubble1 = document.getElementById("speech-bubble-1");
+        bubble2 = document.getElementById("speech-bubble-2");
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        dirLight.position.set(100, 80, 50);
+        scene.add(dirLight);
+
+        const LAMBERT_MATERIAL = (color) =>
+          new THREE.MeshLambertMaterial({ color });
+
+        function createTrackTexture() {
+          const canvas = document.createElement("canvas");
+          canvas.width = 32;
+          canvas.height = 128;
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#3a3a3a";
+          ctx.fillRect(0, 0, 32, 128);
+          ctx.fillStyle = "#2a2a2a";
+          for (let i = 0; i < 128; i += 8) {
+            ctx.fillRect(0, i, 32, 4);
+          }
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          return texture;
+        }
+        const trackMaterial = new THREE.MeshLambertMaterial({
+          map: createTrackTexture(),
+        });
+
+        function createEars(type) {
+          const earGroup = new THREE.Group();
+          let earGeom, earMat;
+
+          if (type === "cat") {
+            earGeom = new THREE.ConeGeometry(0.6, 1.2, 4);
+            earMat = LAMBERT_MATERIAL(0x111111);
+          } else {
+            // wolf
+            earGeom = new THREE.ConeGeometry(0.5, 1.8, 4);
+            earMat = LAMBERT_MATERIAL(0x666666);
+          }
+
+          const ear1 = new THREE.Mesh(earGeom, earMat);
+          ear1.position.set(-1.2, 1.2, -0.5);
+          ear1.rotation.y = -Math.PI / 8;
+
+          const ear2 = new THREE.Mesh(earGeom, earMat);
+          ear2.position.set(1.2, 1.2, -0.5);
+          ear2.rotation.y = Math.PI / 8;
+
+          earGroup.add(ear1, ear2);
+          return earGroup;
+        }
+
+        // --- GŁÓWNA ZMIANA: CAŁKOWICIE PRZEBUDOWANA FUNKCJA TWORZENIA CZOŁGU ---
+        function createTank(color, earType) {
+          const tank = new THREE.Group();
+          const hullMaterial = LAMBERT_MATERIAL(color);
+
+          // Definicja wymiarów czołgu
+          const hullWidth = 5.5;
+          const hullHeight = 1.8;
+          const hullLength = 9.0;
+
+          // --- NOWY KADŁUB ---
+          const mainHull = new THREE.Mesh(
+            new THREE.BoxGeometry(hullWidth, hullHeight, hullLength - 2),
+            hullMaterial
+          );
+          mainHull.position.y = hullHeight / 2;
+          tank.add(mainHull);
+
+          // Pochyła przednia płyta (glacis)
+          const glacisGeom = new THREE.BoxGeometry(
+            hullWidth,
+            hullHeight * 1.2,
+            2.5
+          );
+          const glacis = new THREE.Mesh(glacisGeom, hullMaterial);
+          glacis.position.set(0, hullHeight / 2 - 0.2, -hullLength / 2 + 0.5);
+          glacis.rotation.x = -Math.PI / 6; // Kąt pochylenia
+          tank.add(glacis);
+
+          // --- NOWE GĄSIENICE I KOŁA ---
+          const trackWidth = 1.2;
+          const trackHeight = 2.4;
+          const trackLength = hullLength + 1;
+          const trackGroup = new THREE.Group();
+          tank.add(trackGroup);
+
+          // Lewa i prawa gąsienica
+          const leftTrack = new THREE.Mesh(
+            new THREE.BoxGeometry(trackWidth, trackHeight, trackLength),
+            trackMaterial
+          );
+          const rightTrack = leftTrack.clone();
+          leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
+          rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
+          trackGroup.add(leftTrack, rightTrack);
+          tank.tracks = [leftTrack, rightTrack]; // Dla przewijania tekstury
+
+          // --- ANIMOWANE KOŁA ---
+          const wheelGeom = new THREE.CylinderGeometry(
+            0.8,
+            0.8,
+            trackWidth + 0.2,
+            16
+          );
+          wheelGeom.rotateZ(Math.PI / 2); // Obracamy, aby były ustawione pionowo
+          const wheelMaterial = new THREE.MeshLambertMaterial({
+            color: 0x222222,
+          });
+          tank.wheels = [];
+
+          for (let i = 0; i < 2; i++) {
+            // Lewa i prawa strona
+            for (let j = 0; j < 5; j++) {
+              // 5 kół na stronę
+              const wheel = new THREE.Mesh(wheelGeom, wheelMaterial);
+              const xPos =
+                i === 0
+                  ? -hullWidth / 2 - trackWidth / 2
+                  : hullWidth / 2 + trackWidth / 2;
+              const zPos = -hullLength / 2 + 1 + j * 1.8;
+              wheel.position.set(xPos, -0.2, zPos);
+              trackGroup.add(wheel);
+              tank.wheels.push(wheel);
+            }
+          }
+          trackGroup.position.y = trackHeight / 2 - 0.5;
+
+          // --- NOWA, FASETOWANA WIEŻA ---
+          const turretPoints = [
+            new THREE.Vector3(2, 0, 2),
+            new THREE.Vector3(2, 0, -2.5),
+            new THREE.Vector3(-2, 0, -2.5),
+            new THREE.Vector3(-2, 0, 2),
+            new THREE.Vector3(1.5, 2, 1.5),
+            new THREE.Vector3(1.5, 2, -2),
+            new THREE.Vector3(-1.5, 2, -2),
+            new THREE.Vector3(-1.5, 2, 1.5),
+          ];
+          const turretGeometry = new ConvexGeometry(turretPoints);
+          const turretMaterial = LAMBERT_MATERIAL(
+            color.clone().offsetHSL(0, 0, 0.1)
+          );
+          const turret = new THREE.Mesh(turretGeometry, turretMaterial);
+          turret.position.y = hullHeight + 0.1;
+          turret.position.z = 1; // Przesunięcie wieży lekko do tyłu
+          tank.add(turret);
+
+          // Uszy dodane do nowej wieży
+          const ears = createEars(earType);
+          ears.position.y = 1; // Dopasowanie wysokości uszu
+          turret.add(ears);
+
+          // Jarzmo i lufa dodane do nowej wieży
+          const mantlet = new THREE.Mesh(
+            new THREE.BoxGeometry(1.5, 1.5, 1),
+            LAMBERT_MATERIAL(0x444444)
+          );
+          mantlet.position.set(0, 0.8, -2.5);
+          turret.add(mantlet);
+
+          const barrel = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.3, 0.2, 6, 12),
+            LAMBERT_MATERIAL(0x333333)
+          );
+          barrel.rotation.x = Math.PI / 2;
+          barrel.position.z = 3;
+          mantlet.add(barrel);
+
+          tank.originalMaterials = new Map();
+          tank.traverse((child) => {
+            if (child.isMesh) {
+              tank.originalMaterials.set(child, child.material);
+            }
+          });
+
+          tank.turret = turret;
+          tank.barrel = barrel;
+          tank.mantlet = mantlet;
+          tank.position.y = 1.25;
+          tank.userData.isTank = true;
+          return tank;
+        }
+
+        player1Tank = createTank(new THREE.Color(0x38a849), "wolf");
+        player1Tank.position.set(-20, 1.25, 0);
+        player1Tank.userData.playerIndex = 0;
+        scene.add(player1Tank);
+
+        player2Tank = createTank(new THREE.Color(0x35a8d4), "cat");
+        player2Tank.position.set(20, 1.25, 0);
+        player2Tank.rotation.y = Math.PI;
+        player2Tank.userData.playerIndex = 1;
+        scene.add(player2Tank);
+
+        function createGroundTexture() {
+          const canvas = document.createElement("canvas");
+          canvas.width = 256;
+          canvas.height = 256;
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#3c581a";
+          ctx.fillRect(0, 0, 256, 256);
+          for (let i = 0; i < 8000; i++) {
+            const x = Math.random() * 256;
+            const y = Math.random() * 256;
+            ctx.fillStyle = Math.random() > 0.7 ? "#6B8E23" : "#556B2F";
+            ctx.fillRect(x, y, 2, 2);
+          }
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          texture.repeat.set(32, 32);
+          return texture;
+        }
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE),
+          new THREE.MeshLambertMaterial({ map: createGroundTexture() })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        function createCactus() {
+          const cactus = new THREE.Group();
+          const cactusMaterial = LAMBERT_MATERIAL(0x2e8b57);
+          const basePadGeom = new THREE.SphereGeometry(1.5, 12, 8);
+
+          function createPad() {
+            const pad = new THREE.Mesh(basePadGeom, cactusMaterial);
+            pad.scale.set(0.8, 1, 0.2);
+            return pad;
+          }
+
+          const basePad = createPad();
+          basePad.position.y = 1.5;
+          cactus.add(basePad);
+
+          let lastPad = basePad;
+          const numPads = 2 + Math.floor(Math.random() * 4);
+
+          for (let i = 0; i < numPads; i++) {
+            const newPad = createPad();
+            const side = Math.random() < 0.5 ? -1 : 1;
+            newPad.position.copy(lastPad.position);
+            newPad.position.y += 1.3;
+            newPad.position.x += side * 0.5;
+            newPad.rotation.y = Math.random() * Math.PI;
+            newPad.rotation.z = (Math.random() - 0.5) * 0.5;
+            cactus.add(newPad);
+            lastPad = newPad;
+          }
+          return cactus;
+        }
+
+        for (let i = 0; i < 40; i++) {
+          const cactus = createCactus();
+          const x = (Math.random() - 0.5) * (MAP_SIZE - 50);
+          const z = (Math.random() - 0.5) * (MAP_SIZE - 50);
+          cactus.position.set(x, 0, z);
+          cactus.rotation.y = Math.random() * Math.PI * 2;
+          scene.add(cactus);
+        }
+
+        function createToilet() {
+          const toilet = new THREE.Group();
+
+          const doorCanvas = document.createElement("canvas");
+          doorCanvas.width = 128;
+          doorCanvas.height = 256;
+          const ctx = doorCanvas.getContext("2d");
+          ctx.fillStyle = "#654321";
+          ctx.fillRect(0, 0, 128, 256);
+          ctx.font = "bold 60px Arial";
+          ctx.fillStyle = "white";
+          ctx.textAlign = "center";
+          ctx.fillText("WC", 64, 80);
+
+          ctx.beginPath();
+          ctx.arc(64, 150, 30, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#654321";
+          ctx.beginPath();
+          ctx.arc(50, 150, 28, 0, Math.PI * 2);
+          ctx.fill();
+
+          const doorTexture = new THREE.CanvasTexture(doorCanvas);
+          const doorMaterial = new THREE.MeshLambertMaterial({
+            map: doorTexture,
+          });
+          const woodMaterial = LAMBERT_MATERIAL(0x8b4513);
+
+          const body = new THREE.Mesh(
+            new THREE.BoxGeometry(4, 7, 4),
+            woodMaterial
+          );
+          body.position.y = 3.5;
+          toilet.add(body);
+
+          const door = new THREE.Mesh(
+            new THREE.PlaneGeometry(3, 6),
+            doorMaterial
+          );
+          door.position.set(0, 3.5, 2.05);
+          toilet.add(door);
+
+          const roof = new THREE.Mesh(
+            new THREE.BoxGeometry(5, 0.5, 5),
+            LAMBERT_MATERIAL(0x5d3a1a)
+          );
+          roof.position.y = 7.25;
+          roof.rotation.x = 0.2;
+          toilet.add(roof);
+
+          toilet.userData.isToilet = true;
+          return toilet;
+        }
+
+        for (let i = 0; i < 10; i++) {
+          const toilet = createToilet();
+          const x = (Math.random() - 0.5) * (MAP_SIZE - 80) + 20;
+          const z = (Math.random() - 0.5) * (MAP_SIZE - 80) + 20;
+          toilet.position.set(x, 0, z);
+          toilet.rotation.y = Math.random() * Math.PI * 2;
+          scene.add(toilet);
+          gameObjects.toilets.push(toilet);
+        }
+
+        const startGame = () => {
+          document.getElementById("start-screen").style.display = "none";
+          gameState.gameStarted = true;
+          document.getElementById(
+            "hud-left"
+          ).innerHTML = `<div class="hud-line"><strong>GRACZ 1</strong><span>HP: <span id="hp-value-1"></span></span></div><div class="hud-bar"><div id="hp-bar-1" class="hud-bar-fill"></div></div><div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value-1"></span></div><div class="hud-line"><span>Apteczki:</span><span id="medkits-value-1"></span></div>`;
+          document.getElementById(
+            "hud-right"
+          ).innerHTML = `<div class="hud-line"><strong>GRACZ 2</strong><span>HP: <span id="hp-value-2"></span></span></div><div class="hud-bar"><div id="hp-bar-2" class="hud-bar-fill"></div></div><div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value-2"></span></div><div class="hud-line"><span>Apteczki:</span><span id="medkits-value-2"></span></div>`;
+          updateHUD();
+          window.removeEventListener("keydown", startGame);
+        };
+        window.addEventListener("keydown", startGame, { once: true });
+
+        document.addEventListener("keydown", (e) => {
+          keys[e.code] = true;
+        });
+        document.addEventListener("keyup", (e) => {
+          keys[e.code] = false;
+          if (!gameState.gameStarted || gameState.gameOver) return;
+          for (let i = 0; i < 2; i++) {
+            if (e.code === CONTROLS[i].reload) startReload(i);
+            if (e.code === CONTROLS[i].heal) healPlayer(i);
+          }
+        });
+
+        const menuEl = document.getElementById("menu"),
+          mapEl = document.getElementById("map-overlay");
+        document.addEventListener("keydown", (e) => {
+          if (!gameState.gameStarted || gameState.gameOver) return;
+          if (e.code === "Escape") {
+            gameState.paused = !gameState.paused;
+            menuEl.style.display = gameState.paused ? "flex" : "none";
+          }
+          if (e.code === "KeyM") {
+            gameState.paused = !gameState.paused;
+            mapEl.style.display = gameState.paused ? "flex" : "none";
+            if (mapEl.style.display === "flex") drawMap();
+          }
+        });
+
+        // --- ZMIANA: AKTUALIZACJA STEROWANIA DLA ANIMACJI KÓŁ ---
+        function handleControls(delta) {
+          if (gameState.gameOver) return;
+          const tanks = [player1Tank, player2Tank];
+          for (let i = 0; i < 2; i++) {
+            if (gameState.players[i].health <= 0) continue;
+            const tank = tanks[i],
+              controls = CONTROLS[i];
+            const moveSpeed = 15 * delta,
+              rotateSpeed = 1.5 * delta;
+
+            const wheelRotationSpeed = moveSpeed * 2.5;
+
+            if (keys[controls.fwd]) {
+              tank.translateZ(-moveSpeed);
+              tank.tracks.forEach(
+                (t) => (t.material.map.offset.y -= moveSpeed * 0.1)
+              );
+              // Animacja kół do przodu
+              tank.wheels.forEach((w) => (w.rotation.x -= wheelRotationSpeed));
+            }
+            if (keys[controls.back]) {
+              tank.translateZ(moveSpeed);
+              tank.tracks.forEach(
+                (t) => (t.material.map.offset.y += moveSpeed * 0.1)
+              );
+              // Animacja kół do tyłu
+              tank.wheels.forEach((w) => (w.rotation.x += wheelRotationSpeed));
+            }
+            if (keys[controls.left]) {
+              tank.rotation.y += rotateSpeed;
+            }
+            if (keys[controls.right]) {
+              tank.rotation.y -= rotateSpeed;
+            }
+            if (keys[controls.tLeft]) {
+              tank.turret.rotation.y += rotateSpeed;
+            }
+            if (keys[controls.tRight]) {
+              tank.turret.rotation.y -= rotateSpeed;
+            }
+            if (keys[controls.tUp]) {
+              if (tank.mantlet.rotation.x > -0.5)
+                tank.mantlet.rotation.x -= rotateSpeed * 0.5;
+            }
+            if (keys[controls.tDown]) {
+              if (tank.mantlet.rotation.x < 0.2)
+                tank.mantlet.rotation.x += rotateSpeed * 0.5;
+            }
+            if (keys[controls.fire]) fire(i);
+          }
+        }
+
+        function fire(playerIndex) {
+          const playerState = gameState.players[playerIndex];
+          if (
+            !playerState.canFire ||
+            playerState.isReloading ||
+            playerState.ammo <= 0
+          ) {
+            if (!playerState.canFire) return;
+            displayMessage(
+              playerState.ammo <= 0 ? "BRAK AMUNICJI!" : "PRZEŁADOWYWANIE...",
+              1000
+            );
+            return;
+          }
+          playerState.ammo--;
+          playerState.canFire = false;
+
+          const tank = playerIndex === 0 ? player1Tank : player2Tank;
+
+          const projectile = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.25, 1.0, 4, 8),
+            new THREE.MeshStandardMaterial({
+              color: 0x333333,
+              emissive: 0xffa500,
+              emissiveIntensity: 2,
+            })
+          );
+          projectile.rotation.x = Math.PI / 2;
+
+          const direction = new THREE.Vector3();
+          tank.barrel.getWorldDirection(direction);
+
+          // --- POPRAWKA: PRZYWRÓCENIE LOGIKI PROSTEGO STRZAŁU Z POPRZEDNIEJ WERSJI ---
+          // Zerujemy składową Y, aby pocisk leciał idealnie prosto (równolegle do ziemi).
+          direction.y = 0;
+          // Normalizujemy wektor, aby zachować stałą prędkość po modyfikacji.
+          direction.normalize();
+
+          const startPosition = new THREE.Vector3();
+          tank.barrel.getWorldPosition(startPosition);
+
+          projectile.position.copy(startPosition);
+          projectile.velocity = direction
+            .clone()
+            .multiplyScalar(PROJECTILE_SPEED);
+          projectile.ownerIndex = playerIndex;
+          projectile.creationTime = clock.getElapsedTime();
+          projectile.trailTimer = 0;
+
+          gameObjects.projectiles.push(projectile);
+          scene.add(projectile);
+
+          let recoil = { val: 0 };
+          new TWEEN.Tween(recoil)
+            .to({ val: -1 }, 100)
+            .yoyo(true)
+            .repeat(1)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => (tank.barrel.position.z = 3 + recoil.val))
+            .start();
+          setTimeout(() => {
+            playerState.canFire = true;
+          }, playerState.fireCooldown);
+        }
+
+        function updateProjectiles(delta) {
+          const targets = [player1Tank, player2Tank];
+          for (let i = gameObjects.projectiles.length - 1; i >= 0; i--) {
+            const p = gameObjects.projectiles[i];
+
+            p.position.add(p.velocity.clone().multiplyScalar(delta));
+            p.lookAt(p.position.clone().add(p.velocity));
+
+            p.trailTimer -= delta;
+            if (p.trailTimer <= 0) {
+              createTrailParticle(p.position);
+              p.trailTimer = 0.02;
+            }
+
+            let destroyed = false;
+
+            for (const target of targets) {
+              if (
+                p.ownerIndex !== target.userData.playerIndex &&
+                target.userData.isTank
+              ) {
+                if (p.position.distanceTo(target.position) < 5) {
+                  handleDamage(target, 25);
+                  createExplosion(p.position, 1.5);
+                  destroyed = true;
+                  break;
+                }
+              }
+            }
+
+            if (p.position.y <= 0.2) {
+              createExplosion(p.position, 0.8, true);
+              destroyed = true;
+            }
+
+            if (destroyed || clock.getElapsedTime() - p.creationTime > 5) {
+              scene.remove(p);
+              p.geometry.dispose();
+              p.material.dispose();
+              gameObjects.projectiles.splice(i, 1);
+            }
+          }
+        }
+
+        function checkToiletCollisions() {
+          const tanks = [player1Tank, player2Tank];
+          for (let i = 0; i < tanks.length; i++) {
+            const tank = tanks[i];
+            if (gameState.players[i].health <= 0) continue;
+
+            for (let j = gameObjects.toilets.length - 1; j >= 0; j--) {
+              const toilet = gameObjects.toilets[j];
+              if (tank.position.distanceTo(toilet.position) < 5) {
+                createExplosion(toilet.position, 2.0);
+
+                gameState.players[i].ammo = TANK_STATS.clipSize;
+                displayMessage("DODATKOWA AMUNICJA!", 1500);
+
+                scene.remove(toilet);
+                gameObjects.toilets.splice(j, 1);
+              }
+            }
+          }
+        }
+
+        function handleDamage(target, amount) {
+          const playerIndex = target.userData.playerIndex;
+          const playerState = gameState.players[playerIndex];
+          if (playerState.health <= 0) return;
+          playerState.health -= amount;
+
+          target.traverse((child) => {
+            if (child.isMesh && target.originalMaterials.has(child)) {
+              const originalMaterial = target.originalMaterials.get(child);
+              child.material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+              setTimeout(() => {
+                if (child.material) child.material = originalMaterial;
+              }, 150);
+            }
+          });
+
+          if (playerState.health <= 0) {
+            playerState.health = 0;
+            gameState.gameOver = true;
+            createExplosion(target.position, 4);
+            target.traverse((child) => {
+              if (child.isMesh) {
+                child.material = new THREE.MeshBasicMaterial({
+                  color: 0x1a1a1a,
+                  wireframe: true,
+                });
+              }
+            });
+            const winner = playerIndex === 0 ? 2 : 1;
+            document.getElementById(
+              "game-over-message"
+            ).innerText = `GRA SKOŃCZONA!\nWYGRYWA GRACZ ${winner}`;
+            document.getElementById("game-over-message").style.display =
+              "block";
+          }
+        }
+
+        function updateHUD() {
+          if (!gameState.gameStarted) return;
+          const hudElements = [
+            {
+              hpVal: document.getElementById("hp-value-1"),
+              hpBar: document.getElementById("hp-bar-1"),
+              ammo: document.getElementById("ammo-value-1"),
+              med: document.getElementById("medkits-value-1"),
+            },
+            {
+              hpVal: document.getElementById("hp-value-2"),
+              hpBar: document.getElementById("hp-bar-2"),
+              ammo: document.getElementById("ammo-value-2"),
+              med: document.getElementById("medkits-value-2"),
+            },
+          ];
+          for (let i = 0; i < 2; i++) {
+            const playerState = gameState.players[i];
+            const elements = hudElements[i];
+            const hp = playerState.health;
+            elements.hpVal.innerText = `${Math.max(0, hp.toFixed(0))} / ${
+              TANK_STATS.maxHealth
+            }`;
+            const hpPercent = (Math.max(0, hp) / TANK_STATS.maxHealth) * 100;
+            elements.hpBar.style.width = `${hpPercent}%`;
+            elements.hpBar.className = `hud-bar-fill ${
+              hpPercent < 30 ? "low" : ""
+            }`;
+            elements.ammo.innerText = `${playerState.ammo} / ${TANK_STATS.clipSize}`;
+            elements.med.innerText = playerState.medkits;
+          }
+        }
+
+        function updateSpeechBubbles() {
+          if (!bubble1 || !bubble2) return;
+          const tanks = [player1Tank, player2Tank];
+          const bubbles = [bubble1, bubble2];
+          const cameras = [camera1, camera2];
+          const screenWidth = window.innerWidth,
+            screenHeight = window.innerHeight;
+
+          for (let i = 0; i < 2; i++) {
+            if (bubbles[i].style.display === "block") {
+              const position = new THREE.Vector3();
+              tanks[i].getWorldPosition(position);
+              position.y += 6;
+              const screenPos = position.clone().project(cameras[i]);
+              let x = (screenPos.x * 0.5 + 0.5) * (screenWidth / 2);
+              const y = (-screenPos.y * 0.5 + 0.5) * screenHeight;
+              if (i === 1) {
+                x += screenWidth / 2;
+              }
+              if (
+                y < 0 ||
+                y > screenHeight ||
+                x < 0 ||
+                x > screenWidth ||
+                screenPos.z > 1
+              ) {
+                bubbles[i].style.display = "none";
+              } else {
+                bubbles[i].style.left = `${x}px`;
+                bubbles[i].style.top = `${y}px`;
+              }
+            }
+          }
+        }
+
+        const messageEl = document.getElementById("message-display");
+        let messageTimeout;
+        function displayMessage(text, duration) {
+          clearTimeout(messageTimeout);
+          messageEl.innerText = text;
+          messageEl.style.display = "block";
+          messageTimeout = setTimeout(
+            () => (messageEl.style.display = "none"),
+            duration
+          );
+        }
+
+        function animate() {
+          requestAnimationFrame(animate);
+          const delta = clock.getDelta();
+          const width = window.innerWidth,
+            height = window.innerHeight;
+
+          if (gameState.gameStarted && !gameState.paused) {
+            handleControls(delta);
+            updateProjectiles(delta);
+            updateParticles(delta);
+            checkToiletCollisions();
+            TWEEN.update();
+
+            speechBubbleCooldown -= delta;
+            if (speechBubbleCooldown <= 0) {
+              speechBubbleCooldown = 8 + Math.random() * 10;
+              const activeBubbles = [bubble1, bubble2].some(
+                (b) => b.style.display === "block"
+              );
+              if (!activeBubbles) {
+                const playerIndex = Math.floor(Math.random() * 2);
+                if (gameState.players[playerIndex].health > 0) {
+                  const bubble = playerIndex === 0 ? bubble1 : bubble2;
+                  bubble.innerText =
+                    funnyMessages[
+                      Math.floor(Math.random() * funnyMessages.length)
+                    ];
+                  bubble.style.display = "block";
+                  setTimeout(() => {
+                    bubble.style.display = "none";
+                  }, SPEECH_BUBBLE_DURATION * 1000);
+                }
+              }
+            }
+            updateSpeechBubbles();
+
+            const offset = new THREE.Vector3(0, 15, 30);
+            camera1.position.lerp(
+              player1Tank.position.clone().add(offset),
+              0.1
+            );
+            camera1.lookAt(
+              player1Tank.position.clone().add(new THREE.Vector3(0, 2, 0))
+            );
+            camera2.position.lerp(
+              player2Tank.position.clone().add(offset),
+              0.1
+            );
+            camera2.lookAt(
+              player2Tank.position.clone().add(new THREE.Vector3(0, 2, 0))
+            );
+          }
+
+          if (mapEl.style.display === "flex") drawMap();
+          updateHUD();
+
+          renderer.setViewport(0, 0, width / 2, height);
+          renderer.setScissor(0, 0, width / 2, height);
+          renderer.render(scene, camera1);
+
+          renderer.setViewport(width / 2, 0, width / 2, height);
+          renderer.setScissor(width / 2, 0, width / 2, height);
+          renderer.render(scene, camera2);
+        }
+        animate();
+      }
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.body.appendChild(script);
+        });
+      }
+
+      loadScript("https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js")
+        .then(() => {
+          initGame();
+        })
+        .catch((error) => {
+          console.error("Błąd ładowania skryptu Tween.js:", error);
+        });
+
+      window.addEventListener("resize", () => {
+        if (!camera1 || !camera2 || !renderer) return;
+        const width = window.innerWidth,
+          height = window.innerHeight;
+        camera1.aspect = width / 2 / height;
+        camera1.updateProjectionMatrix();
+        camera2.aspect = width / 2 / height;
+        camera2.updateProjectionMatrix();
+        renderer.setSize(width, height);
+      });
+
+      function startReload(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        if (playerState.ammo === TANK_STATS.clipSize || playerState.isReloading)
+          return;
+        playerState.isReloading = true;
+        displayMessage(
+          `Gracz ${playerIndex + 1}: PRZEŁADOWYWANIE...`,
+          TANK_STATS.reloadTime
+        );
+        setTimeout(() => {
+          playerState.ammo = TANK_STATS.clipSize;
+          playerState.isReloading = false;
+        }, TANK_STATS.reloadTime);
+      }
+      function healPlayer(playerIndex) {
+        const playerState = gameState.players[playerIndex];
+        if (
+          playerState.medkits > 0 &&
+          playerState.health < TANK_STATS.maxHealth &&
+          playerState.health > 0
+        ) {
+          playerState.medkits--;
+          playerState.health = Math.min(
+            TANK_STATS.maxHealth,
+            playerState.health + TANK_STATS.healAmount
+          );
+          displayMessage(`Gracz ${playerIndex + 1}: LECZENIE...`, 1000);
+        }
+      }
+      function createExplosion(position, scale, isDust = false) {
+        const particleCount = isDust ? 10 : 15;
+        for (let i = 0; i < particleCount * scale; i++) {
+          const particle = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2 * scale, 4, 4),
+            new THREE.MeshBasicMaterial({
+              color: isDust
+                ? 0x966932
+                : Math.random() > 0.5
+                ? 0xffa500
+                : 0xff4500,
+              transparent: true,
+              opacity: isDust ? 0.6 : 1.0,
+            })
+          );
+          particle.position.copy(position);
+          const velocitySpread = isDust ? 5 : 20;
+          particle.velocity = new THREE.Vector3(
+            Math.random() - 0.5,
+            isDust ? Math.random() * 0.5 : Math.random() - 0.5,
+            Math.random() - 0.5
+          )
+            .normalize()
+            .multiplyScalar(Math.random() * velocitySpread * scale);
+          particle.lifespan = Math.random() * 0.6 + 0.2;
+          gameObjects.particles.push(particle);
+          scene.add(particle);
+        }
+      }
+
+      function createTrailParticle(position) {
+        const particle = new THREE.Mesh(
+          new THREE.SphereGeometry(0.3, 4, 4),
+          new THREE.MeshBasicMaterial({
+            color: 0x555555,
+            transparent: true,
+            opacity: 0.5,
+          })
+        );
+        particle.position.copy(position);
+        particle.velocity = new THREE.Vector3(0, 0, 0);
+        particle.lifespan = Math.random() * 0.4 + 0.1;
+        gameObjects.particles.push(particle);
+        scene.add(particle);
+      }
+
+      function updateParticles(delta) {
+        for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
+          const p = gameObjects.particles[i];
+          p.lifespan -= delta;
+          if (p.lifespan <= 0) {
+            scene.remove(p);
+            p.geometry.dispose();
+            p.material.dispose();
+            gameObjects.particles.splice(i, 1);
+          } else {
+            p.position.add(p.velocity.clone().multiplyScalar(delta));
+            p.scale.multiplyScalar(0.97);
+            if (p.material.transparent) {
+              p.material.opacity = (p.lifespan / 0.5) * 0.5;
+            }
+          }
+        }
+      }
+      function drawMap() {
+        const canvas = document.getElementById("map-container");
+        const ctx = canvas.getContext("2d");
+        const w = canvas.width,
+          h = canvas.height;
+        ctx.fillStyle = "rgba(20, 40, 20, 0.8)";
+        ctx.fillRect(0, 0, w, h);
+        const mapX = (x) => (x / MAP_SIZE) * w + w / 2;
+        const mapZ = (z) => (z / MAP_SIZE) * h + h / 2;
+
+        ctx.fillStyle = "#38A849";
+        ctx.beginPath();
+        ctx.arc(
+          mapX(player1Tank.position.x),
+          mapZ(player1Tank.position.z),
+          5,
+          0,
+          2 * Math.PI
+        );
+        ctx.fill();
+        ctx.fillStyle = "#35A8D4";
+        ctx.beginPath();
+        ctx.arc(
+          mapX(player2Tank.position.x),
+          mapZ(player2Tank.position.z),
+          5,
+          0,
+          2 * Math.PI
+        );
+        ctx.fill();
+
+        ctx.fillStyle = "#8B4513";
+        gameObjects.toilets.forEach((toilet) => {
+          ctx.fillRect(
+            mapX(toilet.position.x) - 3,
+            mapZ(toilet.position.z) - 3,
+            6,
+            6
+          );
+        });
+      }
+    </script>
+  </body>
+</html>
