@@ -188,13 +188,21 @@
       <canvas id="map-container" width="400" height="400"></canvas>
       <p>Naciśnij M, aby wrócić</p>
     </div>
+    <div id="score-overlay" class="overlay" style="display: none">
+      <h1>WYNIK</h1>
+      <p
+        id="score-display"
+        style="font-size: 2.5em; margin: 20px 0; color: #ffc107"
+      ></p>
+      <p>Naciśnij TAB, aby wrócić do gry</p>
+    </div>
 
     <div id="speech-bubble-1" class="speech-bubble"></div>
     <div id="speech-bubble-2" class="speech-bubble"></div>
 
     <div id="start-screen" class="overlay">
       <img
-        src="Logo.png"
+        src="Logo2.webp"
         alt="Logo Gry Wojna Czołgów"
         style="
           max-width: 500px;
@@ -255,7 +263,6 @@
 
     <script type="module">
       import * as THREE from "three";
-      // --- NOWY IMPORT: ConvexGeometry do tworzenia fasetowanej wieży ---
       import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 
       let scene, renderer, clock;
@@ -264,7 +271,6 @@
       let bubble1, bubble2;
 
       const PROJECTILE_SPEED = 160;
-      const GRAVITY = 0;
 
       const TANK_STATS = {
         maxHealth: 100,
@@ -274,13 +280,18 @@
         healAmount: 30,
       };
       const keys = {};
-      const gameObjects = { projectiles: [], particles: [], toilets: [] };
+      const gameObjects = {
+        projectiles: [],
+        particles: [],
+        toilets: [],
+        wreckage: [],
+      };
       const MAP_SIZE = 500;
 
       const gameState = {
         gameStarted: false,
         paused: false,
-        gameOver: false,
+        scores: { player1: 0, player2: 0 },
         players: [
           {
             health: TANK_STATS.maxHealth,
@@ -289,6 +300,8 @@
             isReloading: false,
             canFire: true,
             fireCooldown: 500,
+            isDestroyed: false,
+            respawnTimer: 0,
           },
           {
             health: TANK_STATS.maxHealth,
@@ -297,6 +310,8 @@
             isReloading: false,
             canFire: true,
             fireCooldown: 500,
+            isDestroyed: false,
+            respawnTimer: 0,
           },
         ],
       };
@@ -429,43 +444,35 @@
           return earGroup;
         }
 
-        // --- GŁÓWNA ZMIANA: CAŁKOWICIE PRZEBUDOWANA FUNKCJA TWORZENIA CZOŁGU ---
         function createTank(color, earType) {
           const tank = new THREE.Group();
+          const hullGroup = new THREE.Group(); // Grupa dla kadłuba i podwozia
+          const turretGroup = new THREE.Group(); // Grupa dla wieży
           const hullMaterial = LAMBERT_MATERIAL(color);
 
-          // Definicja wymiarów czołgu
-          const hullWidth = 5.5;
-          const hullHeight = 1.8;
-          const hullLength = 9.0;
+          const hullWidth = 5.5,
+            hullHeight = 1.8,
+            hullLength = 9.0;
 
-          // --- NOWY KADŁUB ---
           const mainHull = new THREE.Mesh(
             new THREE.BoxGeometry(hullWidth, hullHeight, hullLength - 2),
             hullMaterial
           );
           mainHull.position.y = hullHeight / 2;
-          tank.add(mainHull);
+          hullGroup.add(mainHull);
 
-          // Pochyła przednia płyta (glacis)
-          const glacisGeom = new THREE.BoxGeometry(
-            hullWidth,
-            hullHeight * 1.2,
-            2.5
+          const glacis = new THREE.Mesh(
+            new THREE.BoxGeometry(hullWidth, hullHeight * 1.2, 2.5),
+            hullMaterial
           );
-          const glacis = new THREE.Mesh(glacisGeom, hullMaterial);
           glacis.position.set(0, hullHeight / 2 - 0.2, -hullLength / 2 + 0.5);
-          glacis.rotation.x = -Math.PI / 6; // Kąt pochylenia
-          tank.add(glacis);
+          glacis.rotation.x = -Math.PI / 6;
+          hullGroup.add(glacis);
 
-          // --- NOWE GĄSIENICE I KOŁA ---
-          const trackWidth = 1.2;
-          const trackHeight = 2.4;
-          const trackLength = hullLength + 1;
+          const trackWidth = 1.2,
+            trackHeight = 2.4,
+            trackLength = hullLength + 1;
           const trackGroup = new THREE.Group();
-          tank.add(trackGroup);
-
-          // Lewa i prawa gąsienica
           const leftTrack = new THREE.Mesh(
             new THREE.BoxGeometry(trackWidth, trackHeight, trackLength),
             trackMaterial
@@ -474,25 +481,21 @@
           leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
           rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
           trackGroup.add(leftTrack, rightTrack);
-          tank.tracks = [leftTrack, rightTrack]; // Dla przewijania tekstury
+          tank.tracks = [leftTrack, rightTrack];
 
-          // --- ANIMOWANE KOŁA ---
           const wheelGeom = new THREE.CylinderGeometry(
             0.8,
             0.8,
             trackWidth + 0.2,
             16
           );
-          wheelGeom.rotateZ(Math.PI / 2); // Obracamy, aby były ustawione pionowo
+          wheelGeom.rotateZ(Math.PI / 2);
           const wheelMaterial = new THREE.MeshLambertMaterial({
             color: 0x222222,
           });
           tank.wheels = [];
-
           for (let i = 0; i < 2; i++) {
-            // Lewa i prawa strona
             for (let j = 0; j < 5; j++) {
-              // 5 kół na stronę
               const wheel = new THREE.Mesh(wheelGeom, wheelMaterial);
               const xPos =
                 i === 0
@@ -505,8 +508,9 @@
             }
           }
           trackGroup.position.y = trackHeight / 2 - 0.5;
+          hullGroup.add(trackGroup);
+          tank.add(hullGroup);
 
-          // --- NOWA, FASETOWANA WIEŻA ---
           const turretPoints = [
             new THREE.Vector3(2, 0, 2),
             new THREE.Vector3(2, 0, -2.5),
@@ -521,23 +525,21 @@
           const turretMaterial = LAMBERT_MATERIAL(
             color.clone().offsetHSL(0, 0, 0.1)
           );
-          const turret = new THREE.Mesh(turretGeometry, turretMaterial);
-          turret.position.y = hullHeight + 0.1;
-          turret.position.z = 1; // Przesunięcie wieży lekko do tyłu
-          tank.add(turret);
+          const turretMesh = new THREE.Mesh(turretGeometry, turretMaterial);
+          turretGroup.add(turretMesh);
 
-          // Uszy dodane do nowej wieży
           const ears = createEars(earType);
-          ears.position.y = 1; // Dopasowanie wysokości uszu
-          turret.add(ears);
+          ears.position.y = 1;
+          turretGroup.add(ears);
 
-          // Jarzmo i lufa dodane do nowej wieży
-          const mantlet = new THREE.Mesh(
+          const mantlet = new THREE.Group();
+          const mantletMesh = new THREE.Mesh(
             new THREE.BoxGeometry(1.5, 1.5, 1),
             LAMBERT_MATERIAL(0x444444)
           );
+          mantlet.add(mantletMesh);
           mantlet.position.set(0, 0.8, -2.5);
-          turret.add(mantlet);
+          turretGroup.add(mantlet);
 
           const barrel = new THREE.Mesh(
             new THREE.CylinderGeometry(0.3, 0.2, 6, 12),
@@ -547,16 +549,14 @@
           barrel.position.z = 3;
           mantlet.add(barrel);
 
-          tank.originalMaterials = new Map();
-          tank.traverse((child) => {
-            if (child.isMesh) {
-              tank.originalMaterials.set(child, child.material);
-            }
-          });
+          turretGroup.position.y = hullHeight + 0.1;
+          turretGroup.position.z = 1;
+          tank.add(turretGroup);
 
-          tank.turret = turret;
-          tank.barrel = barrel;
+          tank.hullGroup = hullGroup;
+          tank.turret = turretGroup;
           tank.mantlet = mantlet;
+          tank.barrel = barrel;
           tank.position.y = 1.25;
           tank.userData.isTank = true;
           return tank;
@@ -603,26 +603,21 @@
           const cactus = new THREE.Group();
           const cactusMaterial = LAMBERT_MATERIAL(0x2e8b57);
           const basePadGeom = new THREE.SphereGeometry(1.5, 12, 8);
-
-          function createPad() {
+          const createPad = () => {
             const pad = new THREE.Mesh(basePadGeom, cactusMaterial);
             pad.scale.set(0.8, 1, 0.2);
             return pad;
-          }
-
+          };
           const basePad = createPad();
           basePad.position.y = 1.5;
           cactus.add(basePad);
-
           let lastPad = basePad;
           const numPads = 2 + Math.floor(Math.random() * 4);
-
           for (let i = 0; i < numPads; i++) {
             const newPad = createPad();
-            const side = Math.random() < 0.5 ? -1 : 1;
             newPad.position.copy(lastPad.position);
             newPad.position.y += 1.3;
-            newPad.position.x += side * 0.5;
+            newPad.position.x += (Math.random() < 0.5 ? -1 : 1) * 0.5;
             newPad.rotation.y = Math.random() * Math.PI;
             newPad.rotation.z = (Math.random() - 0.5) * 0.5;
             cactus.add(newPad);
@@ -630,19 +625,19 @@
           }
           return cactus;
         }
-
         for (let i = 0; i < 40; i++) {
           const cactus = createCactus();
-          const x = (Math.random() - 0.5) * (MAP_SIZE - 50);
-          const z = (Math.random() - 0.5) * (MAP_SIZE - 50);
-          cactus.position.set(x, 0, z);
+          cactus.position.set(
+            (Math.random() - 0.5) * (MAP_SIZE - 50),
+            0,
+            (Math.random() - 0.5) * (MAP_SIZE - 50)
+          );
           cactus.rotation.y = Math.random() * Math.PI * 2;
           scene.add(cactus);
         }
 
         function createToilet() {
           const toilet = new THREE.Group();
-
           const doorCanvas = document.createElement("canvas");
           doorCanvas.width = 128;
           doorCanvas.height = 256;
@@ -653,7 +648,6 @@
           ctx.fillStyle = "white";
           ctx.textAlign = "center";
           ctx.fillText("WC", 64, 80);
-
           ctx.beginPath();
           ctx.arc(64, 150, 30, 0, Math.PI * 2);
           ctx.fill();
@@ -661,27 +655,22 @@
           ctx.beginPath();
           ctx.arc(50, 150, 28, 0, Math.PI * 2);
           ctx.fill();
-
-          const doorTexture = new THREE.CanvasTexture(doorCanvas);
           const doorMaterial = new THREE.MeshLambertMaterial({
-            map: doorTexture,
+            map: new THREE.CanvasTexture(doorCanvas),
           });
           const woodMaterial = LAMBERT_MATERIAL(0x8b4513);
-
           const body = new THREE.Mesh(
             new THREE.BoxGeometry(4, 7, 4),
             woodMaterial
           );
           body.position.y = 3.5;
           toilet.add(body);
-
           const door = new THREE.Mesh(
             new THREE.PlaneGeometry(3, 6),
             doorMaterial
           );
           door.position.set(0, 3.5, 2.05);
           toilet.add(door);
-
           const roof = new THREE.Mesh(
             new THREE.BoxGeometry(5, 0.5, 5),
             LAMBERT_MATERIAL(0x5d3a1a)
@@ -689,16 +678,17 @@
           roof.position.y = 7.25;
           roof.rotation.x = 0.2;
           toilet.add(roof);
-
           toilet.userData.isToilet = true;
           return toilet;
         }
 
         for (let i = 0; i < 10; i++) {
           const toilet = createToilet();
-          const x = (Math.random() - 0.5) * (MAP_SIZE - 80) + 20;
-          const z = (Math.random() - 0.5) * (MAP_SIZE - 80) + 20;
-          toilet.position.set(x, 0, z);
+          toilet.position.set(
+            (Math.random() - 0.5) * (MAP_SIZE - 80) + 20,
+            0,
+            (Math.random() - 0.5) * (MAP_SIZE - 80) + 20
+          );
           toilet.rotation.y = Math.random() * Math.PI * 2;
           scene.add(toilet);
           gameObjects.toilets.push(toilet);
@@ -723,7 +713,7 @@
         });
         document.addEventListener("keyup", (e) => {
           keys[e.code] = false;
-          if (!gameState.gameStarted || gameState.gameOver) return;
+          if (!gameState.gameStarted) return;
           for (let i = 0; i < 2; i++) {
             if (e.code === CONTROLS[i].reload) startReload(i);
             if (e.code === CONTROLS[i].heal) healPlayer(i);
@@ -731,69 +721,73 @@
         });
 
         const menuEl = document.getElementById("menu"),
-          mapEl = document.getElementById("map-overlay");
+          mapEl = document.getElementById("map-overlay"),
+          scoreEl = document.getElementById("score-overlay"),
+          scoreDisplay = document.getElementById("score-display");
+
+        const updatePauseState = () => {
+          gameState.paused =
+            menuEl.style.display === "flex" ||
+            mapEl.style.display === "flex" ||
+            scoreEl.style.display === "flex";
+        };
+
         document.addEventListener("keydown", (e) => {
-          if (!gameState.gameStarted || gameState.gameOver) return;
+          if (!gameState.gameStarted) return;
           if (e.code === "Escape") {
-            gameState.paused = !gameState.paused;
-            menuEl.style.display = gameState.paused ? "flex" : "none";
-          }
-          if (e.code === "KeyM") {
-            gameState.paused = !gameState.paused;
-            mapEl.style.display = gameState.paused ? "flex" : "none";
+            menuEl.style.display =
+              menuEl.style.display === "flex" ? "none" : "flex";
+          } else if (e.code === "KeyM") {
+            mapEl.style.display =
+              mapEl.style.display === "flex" ? "none" : "flex";
             if (mapEl.style.display === "flex") drawMap();
+          } else if (e.code === "Tab") {
+            e.preventDefault();
+            const isVisible = scoreEl.style.display === "flex";
+            scoreEl.style.display = isVisible ? "none" : "flex";
+            if (!isVisible) {
+              scoreDisplay.innerText = `Gracz 1: ${gameState.scores.player1}   -   Gracz 2: ${gameState.scores.player2}`;
+            }
           }
+          updatePauseState();
         });
 
-        // --- ZMIANA: AKTUALIZACJA STEROWANIA DLA ANIMACJI KÓŁ ---
         function handleControls(delta) {
-          if (gameState.gameOver) return;
           const tanks = [player1Tank, player2Tank];
           for (let i = 0; i < 2; i++) {
-            if (gameState.players[i].health <= 0) continue;
+            const playerState = gameState.players[i];
+            if (playerState.health <= 0 || playerState.isDestroyed) continue;
+
             const tank = tanks[i],
               controls = CONTROLS[i];
             const moveSpeed = 15 * delta,
               rotateSpeed = 1.5 * delta;
-
             const wheelRotationSpeed = moveSpeed * 2.5;
 
+            // --- POPRAWKA: Odwrócenie kierunku ruchu i animacji ---
             if (keys[controls.fwd]) {
-              tank.translateZ(-moveSpeed);
-              tank.tracks.forEach(
-                (t) => (t.material.map.offset.y -= moveSpeed * 0.1)
-              );
-              // Animacja kół do przodu
-              tank.wheels.forEach((w) => (w.rotation.x -= wheelRotationSpeed));
-            }
-            if (keys[controls.back]) {
-              tank.translateZ(moveSpeed);
+              tank.translateZ(moveSpeed); // Zmieniono z -moveSpeed na +moveSpeed
               tank.tracks.forEach(
                 (t) => (t.material.map.offset.y += moveSpeed * 0.1)
-              );
-              // Animacja kół do tyłu
-              tank.wheels.forEach((w) => (w.rotation.x += wheelRotationSpeed));
+              ); // Zmieniono znak
+              tank.wheels.forEach((w) => (w.rotation.x += wheelRotationSpeed)); // Zmieniono znak
             }
-            if (keys[controls.left]) {
-              tank.rotation.y += rotateSpeed;
+            if (keys[controls.back]) {
+              tank.translateZ(-moveSpeed); // Zmieniono z +moveSpeed na -moveSpeed
+              tank.tracks.forEach(
+                (t) => (t.material.map.offset.y -= moveSpeed * 0.1)
+              ); // Zmieniono znak
+              tank.wheels.forEach((w) => (w.rotation.x -= wheelRotationSpeed)); // Zmieniono znak
             }
-            if (keys[controls.right]) {
-              tank.rotation.y -= rotateSpeed;
-            }
-            if (keys[controls.tLeft]) {
-              tank.turret.rotation.y += rotateSpeed;
-            }
-            if (keys[controls.tRight]) {
-              tank.turret.rotation.y -= rotateSpeed;
-            }
-            if (keys[controls.tUp]) {
-              if (tank.mantlet.rotation.x > -0.5)
-                tank.mantlet.rotation.x -= rotateSpeed * 0.5;
-            }
-            if (keys[controls.tDown]) {
-              if (tank.mantlet.rotation.x < 0.2)
-                tank.mantlet.rotation.x += rotateSpeed * 0.5;
-            }
+
+            if (keys[controls.left]) tank.rotation.y += rotateSpeed;
+            if (keys[controls.right]) tank.rotation.y -= rotateSpeed;
+            if (keys[controls.tLeft]) tank.turret.rotation.y += rotateSpeed;
+            if (keys[controls.tRight]) tank.turret.rotation.y -= rotateSpeed;
+            if (keys[controls.tUp] && tank.mantlet.rotation.x > -0.5)
+              tank.mantlet.rotation.x -= rotateSpeed * 0.5;
+            if (keys[controls.tDown] && tank.mantlet.rotation.x < 0.2)
+              tank.mantlet.rotation.x += rotateSpeed * 0.5;
             if (keys[controls.fire]) fire(i);
           }
         }
@@ -803,9 +797,10 @@
           if (
             !playerState.canFire ||
             playerState.isReloading ||
-            playerState.ammo <= 0
+            playerState.ammo <= 0 ||
+            playerState.isDestroyed
           ) {
-            if (!playerState.canFire) return;
+            if (!playerState.canFire || playerState.isDestroyed) return;
             displayMessage(
               playerState.ammo <= 0 ? "BRAK AMUNICJI!" : "PRZEŁADOWYWANIE...",
               1000
@@ -816,7 +811,6 @@
           playerState.canFire = false;
 
           const tank = playerIndex === 0 ? player1Tank : player2Tank;
-
           const projectile = new THREE.Mesh(
             new THREE.CapsuleGeometry(0.25, 1.0, 4, 8),
             new THREE.MeshStandardMaterial({
@@ -829,11 +823,7 @@
 
           const direction = new THREE.Vector3();
           tank.barrel.getWorldDirection(direction);
-
-          // --- POPRAWKA: PRZYWRÓCENIE LOGIKI PROSTEGO STRZAŁU Z POPRZEDNIEJ WERSJI ---
-          // Zerujemy składową Y, aby pocisk leciał idealnie prosto (równolegle do ziemi).
           direction.y = 0;
-          // Normalizujemy wektor, aby zachować stałą prędkość po modyfikacji.
           direction.normalize();
 
           const startPosition = new THREE.Vector3();
@@ -846,7 +836,6 @@
           projectile.ownerIndex = playerIndex;
           projectile.creationTime = clock.getElapsedTime();
           projectile.trailTimer = 0;
-
           gameObjects.projectiles.push(projectile);
           scene.add(projectile);
 
@@ -867,7 +856,6 @@
           const targets = [player1Tank, player2Tank];
           for (let i = gameObjects.projectiles.length - 1; i >= 0; i--) {
             const p = gameObjects.projectiles[i];
-
             p.position.add(p.velocity.clone().multiplyScalar(delta));
             p.lookAt(p.position.clone().add(p.velocity));
 
@@ -878,11 +866,13 @@
             }
 
             let destroyed = false;
-
             for (const target of targets) {
+              const targetState =
+                gameState.players[target.userData.playerIndex];
               if (
                 p.ownerIndex !== target.userData.playerIndex &&
-                target.userData.isTank
+                target.userData.isTank &&
+                !targetState.isDestroyed
               ) {
                 if (p.position.distanceTo(target.position) < 5) {
                   handleDamage(target, 25);
@@ -897,7 +887,6 @@
               createExplosion(p.position, 0.8, true);
               destroyed = true;
             }
-
             if (destroyed || clock.getElapsedTime() - p.creationTime > 5) {
               scene.remove(p);
               p.geometry.dispose();
@@ -905,6 +894,128 @@
               gameObjects.projectiles.splice(i, 1);
             }
           }
+        }
+
+        function handleDamage(target, amount) {
+          const playerIndex = target.userData.playerIndex;
+          const playerState = gameState.players[playerIndex];
+          if (playerState.health <= 0) return;
+          playerState.health -= amount;
+
+          if (playerState.health <= 0) {
+            playerState.health = 0;
+            const winnerIndex = playerIndex === 0 ? 1 : 0;
+            if (winnerIndex === 0) gameState.scores.player1++;
+            else gameState.scores.player2++;
+
+            playerState.isDestroyed = true;
+            playerState.respawnTimer = 3.0;
+            destroyTank(target);
+          }
+        }
+
+        function destroyTank(tank) {
+          createExplosion(tank.position, 4);
+          tank.visible = false;
+
+          const partsToDestroy = [tank.hullGroup, tank.turret];
+          partsToDestroy.forEach((part) => {
+            const wreckClone = part.clone();
+            part.getWorldPosition(wreckClone.position);
+            part.getWorldQuaternion(wreckClone.quaternion);
+            scene.add(wreckClone);
+
+            const wreckObject = {
+              object: wreckClone,
+              velocity: new THREE.Vector3(
+                (Math.random() - 0.5) * 15,
+                Math.random() * 15 + 5,
+                (Math.random() - 0.5) * 15
+              ),
+              angularVelocity: new THREE.Vector3(
+                (Math.random() - 0.5) * 5,
+                (Math.random() - 0.5) * 5,
+                (Math.random() - 0.5) * 5
+              ),
+              lifespan: 10.0, // Wreckage disappears after 10 seconds
+            };
+            gameObjects.wreckage.push(wreckObject);
+          });
+        }
+
+        function updateWreckage(delta) {
+          const gravity = -30;
+          for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
+            const wreck = gameObjects.wreckage[i];
+            wreck.lifespan -= delta;
+            if (wreck.lifespan <= 0) {
+              scene.remove(wreck.object);
+              wreck.object.traverse((child) => {
+                if (child.isMesh) {
+                  child.geometry.dispose();
+                  child.material.dispose();
+                }
+              });
+              gameObjects.wreckage.splice(i, 1);
+              continue;
+            }
+            if (wreck.object.position.y > 0) {
+              wreck.velocity.y += gravity * delta;
+              wreck.object.position.add(
+                wreck.velocity.clone().multiplyScalar(delta)
+              );
+              wreck.object.rotation.x += wreck.angularVelocity.x * delta;
+              wreck.object.rotation.y += wreck.angularVelocity.y * delta;
+              wreck.object.rotation.z += wreck.angularVelocity.z * delta;
+            } else {
+              wreck.object.position.y = 0;
+            }
+          }
+        }
+
+        function checkRespawns(delta) {
+          for (let i = 0; i < 2; i++) {
+            const playerState = gameState.players[i];
+            if (playerState.isDestroyed) {
+              playerState.respawnTimer -= delta;
+              if (playerState.respawnTimer <= 0) {
+                respawnPlayer(i);
+              }
+            }
+          }
+        }
+
+        function respawnPlayer(playerIndex) {
+          const playerState = gameState.players[playerIndex];
+          const tank = playerIndex === 0 ? player1Tank : player2Tank;
+          const startPosition =
+            playerIndex === 0
+              ? new THREE.Vector3(-20, 1.25, 0)
+              : new THREE.Vector3(20, 1.25, 0);
+          const startRotationY = playerIndex === 0 ? 0 : Math.PI;
+
+          playerState.health = TANK_STATS.maxHealth;
+          playerState.ammo = TANK_STATS.clipSize;
+          playerState.isDestroyed = false;
+          playerState.isReloading = false;
+          playerState.canFire = true;
+
+          tank.position.copy(startPosition);
+          tank.rotation.set(0, startRotationY, 0);
+          tank.turret.rotation.set(0, 0, 0);
+          tank.mantlet.rotation.set(0, 0, 0);
+
+          let counter = 0;
+          const interval = setInterval(() => {
+            tank.visible = !tank.visible;
+            counter++;
+            if (counter >= 6) {
+              tank.visible = true;
+              clearInterval(interval);
+            }
+          }, 150);
+
+          updateHUD();
         }
 
         function checkToiletCollisions() {
@@ -917,51 +1028,12 @@
               const toilet = gameObjects.toilets[j];
               if (tank.position.distanceTo(toilet.position) < 5) {
                 createExplosion(toilet.position, 2.0);
-
                 gameState.players[i].ammo = TANK_STATS.clipSize;
                 displayMessage("DODATKOWA AMUNICJA!", 1500);
-
                 scene.remove(toilet);
                 gameObjects.toilets.splice(j, 1);
               }
             }
-          }
-        }
-
-        function handleDamage(target, amount) {
-          const playerIndex = target.userData.playerIndex;
-          const playerState = gameState.players[playerIndex];
-          if (playerState.health <= 0) return;
-          playerState.health -= amount;
-
-          target.traverse((child) => {
-            if (child.isMesh && target.originalMaterials.has(child)) {
-              const originalMaterial = target.originalMaterials.get(child);
-              child.material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-              setTimeout(() => {
-                if (child.material) child.material = originalMaterial;
-              }, 150);
-            }
-          });
-
-          if (playerState.health <= 0) {
-            playerState.health = 0;
-            gameState.gameOver = true;
-            createExplosion(target.position, 4);
-            target.traverse((child) => {
-              if (child.isMesh) {
-                child.material = new THREE.MeshBasicMaterial({
-                  color: 0x1a1a1a,
-                  wireframe: true,
-                });
-              }
-            });
-            const winner = playerIndex === 0 ? 2 : 1;
-            document.getElementById(
-              "game-over-message"
-            ).innerText = `GRA SKOŃCZONA!\nWYGRYWA GRACZ ${winner}`;
-            document.getElementById("game-over-message").style.display =
-              "block";
           }
         }
 
@@ -982,8 +1054,9 @@
             },
           ];
           for (let i = 0; i < 2; i++) {
-            const playerState = gameState.players[i];
-            const elements = hudElements[i];
+            const playerState = gameState.players[i],
+              elements = hudElements[i];
+            if (!elements.hpVal) continue; // Skip if HUD not ready
             const hp = playerState.health;
             elements.hpVal.innerText = `${Math.max(0, hp.toFixed(0))} / ${
               TANK_STATS.maxHealth
@@ -1000,12 +1073,11 @@
 
         function updateSpeechBubbles() {
           if (!bubble1 || !bubble2) return;
-          const tanks = [player1Tank, player2Tank];
-          const bubbles = [bubble1, bubble2];
-          const cameras = [camera1, camera2];
+          const tanks = [player1Tank, player2Tank],
+            bubbles = [bubble1, bubble2],
+            cameras = [camera1, camera2];
           const screenWidth = window.innerWidth,
             screenHeight = window.innerHeight;
-
           for (let i = 0; i < 2; i++) {
             if (bubbles[i].style.display === "block") {
               const position = new THREE.Vector3();
@@ -1014,9 +1086,7 @@
               const screenPos = position.clone().project(cameras[i]);
               let x = (screenPos.x * 0.5 + 0.5) * (screenWidth / 2);
               const y = (-screenPos.y * 0.5 + 0.5) * screenHeight;
-              if (i === 1) {
-                x += screenWidth / 2;
-              }
+              if (i === 1) x += screenWidth / 2;
               if (
                 y < 0 ||
                 y > screenHeight ||
@@ -1057,6 +1127,8 @@
             updateParticles(delta);
             checkToiletCollisions();
             TWEEN.update();
+            updateWreckage(delta);
+            checkRespawns(delta);
 
             speechBubbleCooldown -= delta;
             if (speechBubbleCooldown <= 0) {
@@ -1066,7 +1138,10 @@
               );
               if (!activeBubbles) {
                 const playerIndex = Math.floor(Math.random() * 2);
-                if (gameState.players[playerIndex].health > 0) {
+                if (
+                  gameState.players[playerIndex].health > 0 &&
+                  !gameState.players[playerIndex].isDestroyed
+                ) {
                   const bubble = playerIndex === 0 ? bubble1 : bubble2;
                   bubble.innerText =
                     funnyMessages[
@@ -1104,7 +1179,6 @@
           renderer.setViewport(0, 0, width / 2, height);
           renderer.setScissor(0, 0, width / 2, height);
           renderer.render(scene, camera1);
-
           renderer.setViewport(width / 2, 0, width / 2, height);
           renderer.setScissor(width / 2, 0, width / 2, height);
           renderer.render(scene, camera2);
@@ -1123,12 +1197,10 @@
       }
 
       loadScript("https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js")
-        .then(() => {
-          initGame();
-        })
-        .catch((error) => {
-          console.error("Błąd ładowania skryptu Tween.js:", error);
-        });
+        .then(initGame)
+        .catch((error) =>
+          console.error("Błąd ładowania skryptu Tween.js:", error)
+        );
 
       window.addEventListener("resize", () => {
         if (!camera1 || !camera2 || !renderer) return;
@@ -1143,7 +1215,11 @@
 
       function startReload(playerIndex) {
         const playerState = gameState.players[playerIndex];
-        if (playerState.ammo === TANK_STATS.clipSize || playerState.isReloading)
+        if (
+          playerState.ammo === TANK_STATS.clipSize ||
+          playerState.isReloading ||
+          playerState.isDestroyed
+        )
           return;
         playerState.isReloading = true;
         displayMessage(
@@ -1186,14 +1262,13 @@
             })
           );
           particle.position.copy(position);
-          const velocitySpread = isDust ? 5 : 20;
           particle.velocity = new THREE.Vector3(
             Math.random() - 0.5,
-            isDust ? Math.random() * 0.5 : Math.random() - 0.5,
+            isDust ? Math.random() * 0.5 : Math.random(),
             Math.random() - 0.5
           )
             .normalize()
-            .multiplyScalar(Math.random() * velocitySpread * scale);
+            .multiplyScalar(Math.random() * (isDust ? 5 : 20) * scale);
           particle.lifespan = Math.random() * 0.6 + 0.2;
           gameObjects.particles.push(particle);
           scene.add(particle);
@@ -1228,9 +1303,8 @@
           } else {
             p.position.add(p.velocity.clone().multiplyScalar(delta));
             p.scale.multiplyScalar(0.97);
-            if (p.material.transparent) {
+            if (p.material.transparent)
               p.material.opacity = (p.lifespan / 0.5) * 0.5;
-            }
           }
         }
       }
@@ -1244,26 +1318,30 @@
         const mapX = (x) => (x / MAP_SIZE) * w + w / 2;
         const mapZ = (z) => (z / MAP_SIZE) * h + h / 2;
 
-        ctx.fillStyle = "#38A849";
-        ctx.beginPath();
-        ctx.arc(
-          mapX(player1Tank.position.x),
-          mapZ(player1Tank.position.z),
-          5,
-          0,
-          2 * Math.PI
-        );
-        ctx.fill();
-        ctx.fillStyle = "#35A8D4";
-        ctx.beginPath();
-        ctx.arc(
-          mapX(player2Tank.position.x),
-          mapZ(player2Tank.position.z),
-          5,
-          0,
-          2 * Math.PI
-        );
-        ctx.fill();
+        if (!gameState.players[0].isDestroyed) {
+          ctx.fillStyle = "#38A849";
+          ctx.beginPath();
+          ctx.arc(
+            mapX(player1Tank.position.x),
+            mapZ(player1Tank.position.z),
+            5,
+            0,
+            2 * Math.PI
+          );
+          ctx.fill();
+        }
+        if (!gameState.players[1].isDestroyed) {
+          ctx.fillStyle = "#35A8D4";
+          ctx.beginPath();
+          ctx.arc(
+            mapX(player2Tank.position.x),
+            mapZ(player2Tank.position.z),
+            5,
+            0,
+            2 * Math.PI
+          );
+          ctx.fill();
+        }
 
         ctx.fillStyle = "#8B4513";
         gameObjects.toilets.forEach((toilet) => {
