@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wojna Czołgów 3D - Multiplayer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="intro-screen" class="overlay">
+      <img id="intro-logo" src="Logo.png" alt="Logo Gry Wojna Czołgów" />
+    </div>
+
+    <div id="start-screen" class="overlay" style="display: none">
+      <h1 id="selection-title">Wybierz Swój Czołg</h1>
+      <div class="tank-selection-container">
+        <div class="tank-card" id="select-pl01">
+          <h3>PL-01 Concept</h3>
+          <canvas id="canvas-pl01" class="tank-canvas"></canvas>
+          <div class="stats-container">
+            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-pl01-hp" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-pl01-dmg" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-pl01-spd" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-pl01-rot" class="stat-bar-fill"></div></div></div>
+          </div>
+          <button class="select-button">Wybierz</button>
+        </div>
+        <div class="tank-card locked" id="select-abrams">
+          <div class="premium-label">PREMIUM</div>
+          <h3>M1 Abrams</h3>
+          <canvas id="canvas-abrams" class="tank-canvas"></canvas>
+          <div class="stats-container">
+            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-abrams-hp" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-abrams-dmg" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-abrams-spd" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-abrams-rot" class="stat-bar-fill"></div></div></div>
+          </div>
+          <button class="select-button" disabled>Wybierz</button>
+        </div>
+        <div class="tank-card" id="select-standard">
+          <h3>Standard</h3>
+          <canvas id="canvas-standard" class="tank-canvas"></canvas>
+          <div class="stats-container">
+            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-standard-hp" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-standard-dmg" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-standard-spd" class="stat-bar-fill"></div></div></div>
+            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-standard-rot" class="stat-bar-fill"></div></div></div>
+          </div>
+          <button class="select-button">Wybierz</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pojedynczy HUD dla gracza lokalnego -->
+    <div id="hud" class="hud" style="display: none;">
+      <div class="hud-line"><strong>TWÓJ CZOŁG</strong><span>PUNKTY: <span id="score-value">0</span></span></div>
+      <div class="hud-line"><span>HP:</span><span id="hp-value"></span></div>
+      <div class="hud-bar"><div id="hp-bar" class="hud-bar-fill"></div></div>
+      <div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value"></span></div>
+      <div class="hud-line"><span>Apteczki:</span><span id="medkits-value"></span></div>
+      <div id="powerup-hud" class="hud-powerup" style="display: none;"></div>
+    </div>
+
+    <div id="respawn-message" class="respawn-message" style="display: none"></div>
+    <!-- Kontener na dymki mowy, pozycjonowane absolutnie -->
+    <div id="speech-bubbles-container"></div>
+
+    <!-- Nakładki Menu, Mapy i Wyników -->
+    <div id="menu" class="overlay" style="display: none">
+      <h1>PAUZA</h1>
+      <p>Naciśnij ESC</p>
+    </div>
+    <div id="map-overlay" class="overlay" style="display: none">
+      <h1>MAPA</h1>
+      <canvas id="map-container" width="400" height="400"></canvas>
+      <p>Naciśnij M</p>
+    </div>
+    <div id="score-overlay" class="overlay" style="display: none">
+      <h1>WYNIKI</h1>
+      <p id="score-display" style="font-size: 2.5em; text-align: left;"></p>
+      <p>Przytrzymaj TAB</p>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="script.js"></script>
+  </body>
+</html>
