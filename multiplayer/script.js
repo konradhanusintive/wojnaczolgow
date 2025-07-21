@@ -15,8 +15,13 @@ const gameObjects = {
   houses: {},
   toilets: {},
   crates: {},
-  projectiles: {}, // Dodano do śledzenia pocisków
+  fences: {},
+  mines: {},
+  missiles: {},
+  machineGunBullets: {},
+  projectiles: {},
   particles: [],
+  wreckage: [],
 };
 
 const socket = io();
@@ -28,8 +33,14 @@ const TANKS_DATA = {
   standard: { name: "Standard", stats: { hp: 100, damage: 25, speed: 15, turretRot: 1.5 }, create: createStandardTank },
 };
 const MAP_SIZE = 500;
+const TANK_QUOTES = [
+  "Jedziesz, pociśnij go!", "Trafiony... ale nie zatopiony!", "Mam Cię na celowniku!",
+  "Ktoś zamawiał pizzę z ołowiem?", "Auć, to bolało!", "Potrzebuję wsparcia! Albo kawy.",
+  "Zaraz wracam, muszę przeładować.", "Bum! I po strachu.",
+];
 
-// --- FUNKCJE TWORZĄCE OBIEKTY 3D (bez zmian) ---
+
+// --- FUNKCJE TWORZĄCE OBIEKTY 3D ---
 const LAMBERT_MATERIAL = (color) => new THREE.MeshLambertMaterial({ color });
 function createTrackTexture() {
   const canvas = document.createElement("canvas"); canvas.width = 32; canvas.height = 128; const ctx = canvas.getContext("2d"); ctx.fillStyle = "#3a3a3a"; ctx.fillRect(0, 0, 32, 128); ctx.fillStyle = "#2a2a2a";
@@ -52,7 +63,8 @@ function createStandardTank(color) {
     turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group();
     mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.8, -2.5); turretGroup.add(mantlet);
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 3; mantlet.add(barrel);
-    turretGroup.position.y = hullHeight + 0.1; turretGroup.position.z = 1; tank.add(turretGroup); tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
+    turretGroup.position.y = hullHeight + 0.1; turretGroup.position.z = 1; tank.add(turretGroup);
+    tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
 }
 function createPL01Tank(color) {
     const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.0, hullHeight = 1.5, hullLength = 9.5;
@@ -65,7 +77,7 @@ function createPL01Tank(color) {
     turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group();
     mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.6, -2.8); turretGroup.add(mantlet);
     const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333)); barrel.position.z = 3.5; mantlet.add(barrel); turretGroup.position.y = hullHeight; tank.add(turretGroup);
-    tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
+    tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
 }
 function createAbramsTank(color) {
     const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.5, hullHeight = 2.0, hullLength = 10.0;
@@ -76,19 +88,62 @@ function createAbramsTank(color) {
     const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretTop.position.y = 1.1; turretGroup.add(turretTop); const mantlet = new THREE.Group();
     mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.5, -3.0); turretGroup.add(mantlet);
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 4; mantlet.add(barrel);
-    turretGroup.position.y = hullHeight; tank.add(turretGroup); tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
+    turretGroup.position.y = hullHeight; tank.add(turretGroup);
+    tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
 }
 function createHouse() {
     const house = new THREE.Group(); const body = new THREE.Mesh(new THREE.BoxGeometry(14, 10, 20), LAMBERT_MATERIAL(0xac8c6c)); body.position.y = 5; house.add(body);
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0, 10, 6, 4), LAMBERT_MATERIAL(0xc05454)); roof.position.y = 10 + 3; roof.rotation.y = Math.PI / 4; house.add(roof); return house;
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0, 10, 6, 4), LAMBERT_MATERIAL(0xc05454)); roof.position.y = 10 + 3; roof.rotation.y = Math.PI / 4; house.add(roof);
+    house.userData = { body, roof }; return house;
 }
 function createToilet() {
     const toilet = new THREE.Group(); const body = new THREE.Mesh(new THREE.BoxGeometry(4, 7, 4), LAMBERT_MATERIAL(0x8b4513)); body.position.y = 3.5; toilet.add(body);
     const roof = new THREE.Mesh(new THREE.BoxGeometry(5, 0.5, 5), LAMBERT_MATERIAL(0x5d3a1a)); roof.position.y = 7.25; roof.rotation.x = 0.2; toilet.add(roof); return toilet;
 }
 function createSupplyCrate() {
-    const crate = new THREE.Group(); const material = LAMBERT_MATERIAL(0x8B4513); const base = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), material); base.position.y = 1;
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.25, 3, 16, 1, false, 0, Math.PI), material); lid.rotation.z = Math.PI / 2; lid.position.y = 2; crate.add(base, lid); return crate;
+    const crate = new THREE.Group();
+    const canvas = document.createElement("canvas"); canvas.width = 256; canvas.height = 256; const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#8B4513"; ctx.fillRect(0, 0, 256, 256); ctx.font = "bold 180px Arial"; ctx.fillStyle = "yellow";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("?", 128, 138);
+    const material = new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(canvas) });
+    const base = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), material); base.position.y = 1; crate.add(base); return crate;
+}
+function createFenceSegment() {
+    const segment = new THREE.Group(); const postMaterial = LAMBERT_MATERIAL(0x654321);
+    const postGeom = new THREE.BoxGeometry(0.5, 4, 0.5); const post1 = new THREE.Mesh(postGeom, postMaterial);
+    post1.position.set(-5, 2, 0); segment.add(post1); const post2 = post1.clone(); post2.position.set(5, 2, 0); segment.add(post2);
+    const barGeom = new THREE.BoxGeometry(10, 0.5, 0.2); const bar1 = new THREE.Mesh(barGeom, postMaterial);
+    bar1.position.set(0, 2.5, 0); segment.add(bar1); return segment;
+}
+function createExplosion(position, scale) {
+  const particleCount = 20 * scale;
+  for (let i = 0; i < particleCount; i++) {
+    const color = Math.random() > 0.5 ? 0xffa500 : 0xff4500;
+    const particle = new THREE.Mesh( new THREE.SphereGeometry(0.2 * scale, 4, 4), new THREE.MeshBasicMaterial({ color: color }) );
+    particle.position.copy(position);
+    particle.velocity = new THREE.Vector3( Math.random() - 0.5, Math.random(), Math.random() - 0.5).normalize().multiplyScalar(Math.random() * 20 * scale);
+    particle.lifespan = Math.random() * 0.8 + 0.3;
+    gameObjects.particles.push(particle);
+    scene.add(particle);
+  }
+}
+function destroyObjectWithWreckage(object, parts) {
+    createExplosion(object.position, 4);
+    object.visible = false;
+    parts.forEach((part) => {
+        const wreckClone = part.clone();
+        object.getWorldPosition(wreckClone.position);
+        wreckClone.position.y += part.position.y;
+        object.getWorldQuaternion(wreckClone.quaternion);
+        scene.add(wreckClone);
+        const wreckObject = {
+            object: wreckClone,
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 15, Math.random() * 15 + 5, (Math.random() - 0.5) * 15),
+            angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5),
+            lifespan: 10.0,
+        };
+        gameObjects.wreckage.push(wreckObject);
+    });
 }
 
 // --- LOGIKA UI ---
@@ -130,6 +185,22 @@ function updateHUD() {
     const hpBar = document.getElementById('hp-bar'); hpBar.style.width = `${hpPercent}%`; hpBar.className = `hud-bar-fill ${hpPercent < 30 ? "low" : ""}`;
     document.getElementById('ammo-value').innerText = `${playerState.ammo} / 8 ${playerState.isReloading ? '(Przeładowuję...)' : ''}`;
     document.getElementById('medkits-value').innerText = playerState.medkits; document.getElementById('score-value').innerText = playerState.score;
+
+    const powerupHUD = document.getElementById('powerup-hud');
+    if (playerState.activePowerUp) {
+        powerupHUD.style.display = 'block';
+        let text = "";
+        switch (playerState.activePowerUp) {
+            case "turbo": text = `TURBO: ${playerState.powerUpTimer.toFixed(1)}s`; break;
+            case "machinegun": text = `KARABIN: ${playerState.powerUpTimer.toFixed(1)}s`; break;
+            case "missile": text = `RAKIETA: ${playerState.powerUpAmmo}x`; break;
+            case "mines": text = `MINY: ${playerState.powerUpAmmo}x`; break;
+        }
+        powerupHUD.innerText = text;
+    } else {
+        powerupHUD.style.display = 'none';
+    }
+
     const respawnMsgEl = document.getElementById('respawn-message');
     if (playerState.isDestroyed && playerState.respawnTimer > 0) { respawnMsgEl.style.display = 'block'; respawnMsgEl.innerText = `ODRODZENIE ZA: ${Math.ceil(playerState.respawnTimer)}`; }
     else { respawnMsgEl.style.display = 'none'; }
@@ -140,6 +211,29 @@ function updateScoreboard() {
         .map(p => `<div><span>${p.id === localPlayerId ? 'YOU' : p.id.substring(0, 6)}</span><span>${p.score}</span></div>`).join('');
     scoreDisplay.innerHTML = scoresHtml;
 }
+function showTankQuote(playerId) {
+    const playerTank = gameObjects.players[playerId];
+    if (!playerTank || !camera) return;
+
+    // Check if a bubble for this player already exists
+    let bubble = document.getElementById(`bubble-${playerId}`);
+    if (!bubble) {
+        bubble = document.createElement('div');
+        bubble.className = 'speech-bubble';
+        bubble.id = `bubble-${playerId}`;
+        document.getElementById('speech-bubbles-container').appendChild(bubble);
+    }
+    
+    bubble.innerText = TANK_QUOTES[Math.floor(Math.random() * TANK_QUOTES.length)];
+    bubble.style.display = "block";
+    
+    // Position update logic will be in `animate`
+    // Hide bubble after some time
+    setTimeout(() => {
+        bubble.style.display = "none";
+    }, 4000);
+}
+
 
 // --- LOGIKA GRY (KLIENT) ---
 function initGame(payload) {
@@ -149,16 +243,23 @@ function initGame(payload) {
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
-    reconcileGameState(clientGameState); setupEventListeners(); animate();
+    reconcileGameState(clientGameState);
+    setupEventListeners();
+    animate();
+    setInterval(() => {
+        if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed) {
+             if (Math.random() > 0.5) showTankQuote(localPlayerId);
+        }
+    }, 15000 + Math.random() * 5000);
 }
 function setupEventListeners() {
     document.addEventListener("keydown", (e) => { keys[e.code] = true; });
     document.addEventListener("keyup", (e) => {
         keys[e.code] = false; if (!isGameStarted || !localPlayerId) return;
-        // --- POPRAWKA: Dodano nasłuchiwanie na Enter ---
-        if (e.code === 'Enter') socket.emit('playerAction', { type: 'fire' });
+        if (e.code === 'Space' || e.code === 'Enter') socket.emit('playerAction', { type: 'fire' });
         if (e.code === 'KeyR') socket.emit('playerAction', { type: 'reload' });
         if (e.code === 'KeyB') socket.emit('playerAction', { type: 'heal' });
+        if (e.code === 'KeyG') socket.emit('playerAction', { type: 'dropMine' });
     });
     const menuEl = document.getElementById("menu"), mapEl = document.getElementById("map-overlay"), scoreEl = document.getElementById("score-overlay");
     document.addEventListener("keydown", (e) => {
@@ -178,36 +279,58 @@ function reconcileGameState(serverState) {
         }
     }
     for (const id of clientPlayerIds) { if (!serverPlayerIds.includes(id)) { scene.remove(gameObjects.players[id]); delete gameObjects.players[id]; } }
-    const objectTypes = ['houses', 'toilets', 'crates'];
+    const objectTypes = ['houses', 'toilets', 'crates', 'fences'];
     for (const type of objectTypes) {
         const serverObjectIds = Object.keys(serverState[type] || {}); const clientObjectIds = Object.keys(gameObjects[type]);
         for (const id of serverObjectIds) {
             if (!clientObjectIds.includes(id)) {
                 const data = serverState[type][id]; let newObject;
-                if (type === 'houses') newObject = createHouse(); else if (type === 'toilets') newObject = createToilet(); else if (type === 'crates') newObject = createSupplyCrate();
-                if (newObject) { newObject.position.set(data.position.x, data.position.y, data.position.z); if (data.rotationY) newObject.rotation.y = data.rotationY; scene.add(newObject); gameObjects[type][id] = newObject; }
+                if (type === 'houses') newObject = createHouse(); 
+                else if (type === 'toilets') newObject = createToilet(); 
+                else if (type === 'crates') newObject = createSupplyCrate();
+                else if (type === 'fences') newObject = createFenceSegment();
+                if (newObject) { 
+                    newObject.position.set(data.position.x, data.position.y, data.position.z); 
+                    if (data.rotationY) newObject.rotation.y = data.rotationY; 
+                    scene.add(newObject); gameObjects[type][id] = newObject; 
+                }
             }
         }
         for (const id of clientObjectIds) { if (!serverObjectIds.includes(id)) { scene.remove(gameObjects[type][id]); delete gameObjects[type][id]; } }
     }
 }
-function createProjectileMesh(data) {
-    const ownerTank = gameObjects.players[data.ownerId];
-    if (!ownerTank) return;
-    
-    const projectile = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.25, 1.0, 4, 8),
-        new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 })
-    );
+function createObjectMesh(payload) {
+    const { type, data } = payload;
+    let newMesh;
 
-    // Oblicz pozycję i kierunek na podstawie modelu czołgu właściciela
-    const startPosition = new THREE.Vector3();
-    ownerTank.barrel.getWorldPosition(startPosition); // Używamy zapisanego odniesienia do lufy
-    projectile.position.copy(startPosition);
+    switch(type) {
+        case 'projectile':
+            newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 }) );
+            break;
+        case 'machineGunBullet':
+            newMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffa500 }));
+            break;
+        case 'missile':
+            newMesh = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 12), LAMBERT_MATERIAL(0xcccccc));
+            const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 12), LAMBERT_MATERIAL(0xff0000));
+            tip.position.y = 1.5; newMesh.add(body, tip); newMesh.rotation.x = Math.PI / 2;
+            break;
+        case 'mine':
+            newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444));
+            break;
+        case 'crate':
+            newMesh = createSupplyCrate();
+            break;
+    }
 
-    gameObjects.projectiles[data.id] = projectile;
-    scene.add(projectile);
+    if (newMesh) {
+        newMesh.position.set(data.position.x, data.position.y, data.position.z);
+        gameObjects[type === 'projectile' ? 'projectiles' : type + 's'][data.id] = newMesh;
+        scene.add(newMesh);
+    }
 }
+
 
 // --- GŁÓWNA PĘTLA RENDEROWANIA ---
 function animate() {
@@ -231,18 +354,64 @@ function animate() {
     }
     
     // Interpolacja pocisków
-    for (const id in clientGameState.projectiles) {
-        const serverProjectile = clientGameState.projectiles[id];
-        const clientProjectile = gameObjects.projectiles[id];
-        if (clientProjectile && serverProjectile) {
-            clientProjectile.position.lerp(new THREE.Vector3(serverProjectile.position.x, serverProjectile.position.y, serverProjectile.position.z), 0.5);
+    const projectileTypes = ['projectiles', 'machineGunBullets', 'missiles'];
+    for(const type of projectileTypes) {
+        for (const id in clientGameState[type]) {
+            const serverObj = clientGameState[type][id];
+            const clientObj = gameObjects[type][id];
+            if (clientObj && serverObj) {
+                clientObj.position.lerp(new THREE.Vector3(serverObj.position.x, serverObj.position.y, serverObj.position.z), 0.5);
+            }
         }
     }
 
+    // Animacje
     for (const id in gameObjects.crates) { gameObjects.crates[id].rotation.y += 0.5 * delta; }
+    
+    // Cząsteczki
+    const gravity = -9.8;
+    for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
+        const p = gameObjects.particles[i];
+        p.lifespan -= delta;
+        if (p.lifespan <= 0) {
+            scene.remove(p); p.geometry.dispose(); p.material.dispose(); gameObjects.particles.splice(i, 1);
+        } else {
+            p.velocity.y += gravity * delta; p.position.add(p.velocity.clone().multiplyScalar(delta));
+        }
+    }
+
+    // Wraki
+    const wreckGravity = -30;
+    for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
+        const wreck = gameObjects.wreckage[i];
+        wreck.lifespan -= delta;
+        if (wreck.lifespan <= 0) {
+            scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue;
+        }
+        if (wreck.object.position.y > 0) {
+            wreck.velocity.y += wreckGravity * delta; wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
+            wreck.object.rotation.x += wreck.angularVelocity.x * delta; wreck.object.rotation.y += wreck.angularVelocity.y * delta;
+            wreck.object.rotation.z += wreck.angularVelocity.z * delta;
+        } else { wreck.object.position.y = 0; }
+    }
+
+    // Aktualizacja dymków
+     for (const playerId in gameObjects.players) {
+        const bubble = document.getElementById(`bubble-${playerId}`);
+        if (bubble && bubble.style.display !== 'none') {
+            const playerTank = gameObjects.players[playerId];
+            const vector = new THREE.Vector3(playerTank.position.x, playerTank.position.y + 6, playerTank.position.z);
+            vector.project(camera);
+            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
+            bubble.style.left = `${x}px`;
+            bubble.style.top = `${y}px`;
+        }
+    }
+
+
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
-        // POPRAWKA: Ujemna wartość 'z' umieszcza kamerę ZA czołgiem
         const offset = new THREE.Vector3(0, 20, -30);
         const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
         camera.position.lerp(cameraTargetPosition, 0.1);
@@ -259,48 +428,51 @@ socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:"
 socket.on("gameStateUpdate", (serverState) => { clientGameState = serverState; });
 
 socket.on('objectCreated', (payload) => {
-    if (payload.type === 'projectile') {
-        createProjectileMesh(payload.data);
-    }
+    createObjectMesh(payload);
 });
 socket.on('objectDestroyed', (payload) => {
-    if (payload.type === 'projectile' && gameObjects.projectiles[payload.id]) {
-        scene.remove(gameObjects.projectiles[payload.id]);
-        delete gameObjects.projectiles[payload.id];
+    const { type, id, hit } = payload;
+    let objectList, object;
+
+    // Determine the correct list and object
+    if (type === 'player') {
+        objectList = gameObjects.players;
+    } else {
+        objectList = gameObjects[type + 's'];
+    }
+    object = objectList ? objectList[id] : null;
+
+    if (object) {
+        if(hit) {
+            if (type === 'player') {
+                destroyObjectWithWreckage(object, [object.hullGroup, object.turret]);
+                if (Math.random() > 0.3) showTankQuote(id);
+            } else if (type === 'house') {
+                 destroyObjectWithWreckage(object, object.userData.body ? [object.userData.body, object.userData.roof] : [object]);
+            }
+             else {
+                createExplosion(object.position, 1.5);
+            }
+        }
+        scene.remove(object);
+        delete objectList[id];
     }
 });
 
 socket.on("playerConnected", (playerData) => {
-    // Upewnij się, że gra jest uruchomiona i że gracz jeszcze nie istnieje po stronie klienta
-    if (!isGameStarted || !scene || gameObjects.players[playerData.id]) {
-        return;
-    }
-
+    if (!isGameStarted || !scene || gameObjects.players[playerData.id]) return;
     console.log(`Nowy gracz dołączył: ${playerData.id}`);
-
-    // Dodaj nowego gracza do lokalnej kopii stanu gry
-    if (clientGameState.players) {
-        clientGameState.players[playerData.id] = playerData;
-    }
-
-    // Stwórz model 3D dla czołgu nowego gracza
-    const tankColor = 0xcc3333; // Inni gracze są zawsze czerwoni
+    if (clientGameState.players) { clientGameState.players[playerData.id] = playerData; }
+    const tankColor = 0xcc3333; 
     const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
-    
-    // Ustaw pozycję i rotację początkową
     tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
     tank.rotation.y = playerData.rotation.y;
-    
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
 });
 
 socket.on("playerDisconnected", (id) => {
-    // Usuń gracza z lokalnej kopii stanu gry
-    if (clientGameState.players && clientGameState.players[id]) {
-        delete clientGameState.players[id];
-    }
-    // Usuń obiekt 3D gracza
+    if (clientGameState.players && clientGameState.players[id]) { delete clientGameState.players[id]; }
     if (gameObjects.players[id]) {
         scene.remove(gameObjects.players[id]);
         delete gameObjects.players[id];
