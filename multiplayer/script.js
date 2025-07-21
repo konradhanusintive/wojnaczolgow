@@ -242,7 +242,8 @@ function animate() {
     for (const id in gameObjects.crates) { gameObjects.crates[id].rotation.y += 0.5 * delta; }
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
-        const offset = new THREE.Vector3(0, 20, 30);
+        // POPRAWKA: Ujemna wartość 'z' umieszcza kamerę ZA czołgiem
+        const offset = new THREE.Vector3(0, 20, -30);
         const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
         camera.position.lerp(cameraTargetPosition, 0.1);
         camera.lookAt(localPlayerMesh.position.clone().add(new THREE.Vector3(0, 3, 0)));
