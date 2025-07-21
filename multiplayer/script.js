@@ -256,7 +256,7 @@ function handleFireInput() {
     if (!canFire || !localPlayerId || clientGameState.players[localPlayerId].isDestroyed) return;
 
     const playerState = clientGameState.players[localPlayerId];
-    let cooldownTime = 0.5; // Domyślny cooldown dla działa
+    let cooldownTime = 0.5;
     if(playerState.activePowerUp === 'machinegun') {
         cooldownTime = 0.08;
     } else if (playerState.activePowerUp === 'missile') {
@@ -313,8 +313,8 @@ function createObjectMesh(payload) {
     let newMesh;
     let container = gameObjects[type + 's'];
 
-    if(!container) return; // Nieznany typ obiektu
-    if(container[data.id]) return; // Obiekt już istnieje
+    if(!container) return;
+    if(container[data.id]) return;
 
     switch(type) {
         case 'projectile': newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 }) ); break;
@@ -323,7 +323,7 @@ function createObjectMesh(payload) {
             newMesh = new THREE.Group();
             const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 12), LAMBERT_MATERIAL(0xcccccc));
             const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 12), LAMBERT_MATERIAL(0xff0000));
-            tip.position.y = 1.5; newMesh.add(body, tip); newMesh.rotation.x = Math.PI / 2;
+            tip.position.y = 1.5; newMesh.add(body, tip);
             break;
         case 'mine': newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444)); break;
         case 'crate': newMesh = createSupplyCrate(); break;
@@ -336,10 +336,11 @@ function createObjectMesh(payload) {
         newMesh.position.set(data.position.x, data.position.y, data.position.z);
         if(data.rotationY) newMesh.rotation.y = data.rotationY;
         container[data.id] = newMesh;
+        // Zapisz poprzednią pozycję, aby umożliwić obliczenie kierunku
+        newMesh.lastPosition = new THREE.Vector3().copy(newMesh.position);
         scene.add(newMesh);
     }
 }
-
 
 // --- GŁÓWNA PĘTLA RENDEROWANIA ---
 function animate() {
@@ -347,24 +348,19 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    // Zarządzanie cooldownem strzału
     if (fireCooldown > 0) {
         fireCooldown -= delta;
     } else {
         canFire = true;
     }
-
-    // Ciągłe strzelanie karabinem maszynowym przy wciśniętym klawiszu
     if(keys['Space'] || keys['Enter']) {
         if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') {
             handleFireInput();
         }
     }
 
-
     socket.emit("playerInput", keys);
 
-    // Interpolacja czołgów
     for (const id in clientGameState.players) {
         const serverTank = clientGameState.players[id]; const clientTank = gameObjects.players[id];
         if (clientTank && serverTank) {
@@ -378,23 +374,34 @@ function animate() {
         }
     }
     
-    // Interpolacja pocisków
+    // Interpolacja i rotacja pocisków
     const projectileTypes = ['projectiles', 'machineGunBullets', 'missiles'];
     for(const type of projectileTypes) {
-        if(!clientGameState[type]) continue;
-        for (const id in clientGameState[type]) {
-            const serverObj = clientGameState[type][id];
+        const container = clientGameState[type];
+        if(!container) continue;
+        for (const id in container) {
+            const serverObj = container[id];
             const clientObj = gameObjects[type][id];
             if (clientObj && serverObj) {
-                clientObj.position.lerp(new THREE.Vector3(serverObj.position.x, serverObj.position.y, serverObj.position.z), 0.5);
+                const serverPos = new THREE.Vector3(serverObj.position.x, serverObj.position.y, serverObj.position.z);
+                
+                // Oblicz kierunek ruchu na podstawie ostatniej i obecnej pozycji
+                const moveDirection = serverPos.clone().sub(clientObj.lastPosition).normalize();
+                
+                // Obróć obiekt, aby "patrzył" w kierunku lotu
+                if (moveDirection.lengthSq() > 0.001) {
+                    clientObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), moveDirection);
+                    if (type === 'missile') clientObj.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2));
+                }
+
+                clientObj.position.lerp(serverPos, 0.5);
+                clientObj.lastPosition.copy(clientObj.position);
             }
         }
     }
 
-    // Animacje
     for (const id in gameObjects.crates) { gameObjects.crates[id].rotation.y += 0.5 * delta; }
     
-    // Cząsteczki
     const gravity = -9.8;
     for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
         const p = gameObjects.particles[i];
@@ -406,7 +413,6 @@ function animate() {
         }
     }
 
-    // Wraki
     const wreckGravity = -30;
     for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
         const wreck = gameObjects.wreckage[i];
@@ -416,12 +422,12 @@ function animate() {
         }
         if (wreck.object.position.y > 0) {
             wreck.velocity.y += wreckGravity * delta; wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
-            wreck.object.rotation.x += wreck.angularVelocity.x * delta; wreck.object.rotation.y += wreck.angularVelocity.y * delta;
+            wreck.object.rotation.x += wreck.angularVelocity.x * delta;
+            wreck.object.rotation.y += wreck.angularVelocity.y * delta;
             wreck.object.rotation.z += wreck.angularVelocity.z * delta;
         } else { wreck.object.position.y = 0; }
     }
 
-    // Aktualizacja dymków
      for (const playerId in gameObjects.players) {
         const bubble = document.getElementById(`bubble-${playerId}`);
         const playerTank = gameObjects.players[playerId];
@@ -434,7 +440,6 @@ function animate() {
             bubble.style.top = `${y}px`;
         }
     }
-
 
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
