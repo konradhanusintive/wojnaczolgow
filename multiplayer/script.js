@@ -10,6 +10,9 @@ let isGameStarted = false;
 let isSelectionScreenActive = false;
 
 const keys = {};
+let canFire = true;
+let fireCooldown = 0; // Czas w sekundach
+
 const gameObjects = {
   players: {},
   houses: {},
@@ -208,14 +211,13 @@ function updateHUD() {
 function updateScoreboard() {
     const scoreDisplay = document.getElementById("score-display"); if (!clientGameState.players) return;
     let scoresHtml = Object.values(clientGameState.players).sort((a, b) => b.score - a.score)
-        .map(p => `<div><span>${p.id === localPlayerId ? 'YOU' : p.id.substring(0, 6)}</span><span>${p.score}</span></div>`).join('');
+        .map(p => `<div><span style="color: ${p.id === localPlayerId ? '#38a849' : '#cc3333'}">${p.id === localPlayerId ? 'TY' : p.id.substring(0, 6)}</span><span>${p.score}</span></div>`).join('');
     scoreDisplay.innerHTML = scoresHtml;
 }
 function showTankQuote(playerId) {
     const playerTank = gameObjects.players[playerId];
     if (!playerTank || !camera) return;
 
-    // Check if a bubble for this player already exists
     let bubble = document.getElementById(`bubble-${playerId}`);
     if (!bubble) {
         bubble = document.createElement('div');
@@ -227,10 +229,8 @@ function showTankQuote(playerId) {
     bubble.innerText = TANK_QUOTES[Math.floor(Math.random() * TANK_QUOTES.length)];
     bubble.style.display = "block";
     
-    // Position update logic will be in `animate`
-    // Hide bubble after some time
     setTimeout(() => {
-        bubble.style.display = "none";
+        if(bubble) bubble.style.display = "none";
     }, 4000);
 }
 
@@ -248,15 +248,35 @@ function initGame(payload) {
     animate();
     setInterval(() => {
         if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed) {
-             if (Math.random() > 0.5) showTankQuote(localPlayerId);
+             if (Math.random() > 0.6) showTankQuote(localPlayerId);
         }
     }, 15000 + Math.random() * 5000);
 }
+function handleFireInput() {
+    if (!canFire || !localPlayerId || clientGameState.players[localPlayerId].isDestroyed) return;
+
+    const playerState = clientGameState.players[localPlayerId];
+    let cooldownTime = 0.5; // Domyślny cooldown dla działa
+    if(playerState.activePowerUp === 'machinegun') {
+        cooldownTime = 0.08;
+    } else if (playerState.activePowerUp === 'missile') {
+        cooldownTime = 1.0;
+    }
+
+    socket.emit('playerAction', { type: 'fire' });
+    canFire = false;
+    fireCooldown = cooldownTime;
+}
 function setupEventListeners() {
-    document.addEventListener("keydown", (e) => { keys[e.code] = true; });
+    document.addEventListener("keydown", (e) => {
+        keys[e.code] = true;
+        if (e.code === 'Space' || e.code === 'Enter') {
+            e.preventDefault();
+            handleFireInput();
+        }
+    });
     document.addEventListener("keyup", (e) => {
         keys[e.code] = false; if (!isGameStarted || !localPlayerId) return;
-        if (e.code === 'Space' || e.code === 'Enter') socket.emit('playerAction', { type: 'fire' });
         if (e.code === 'KeyR') socket.emit('playerAction', { type: 'reload' });
         if (e.code === 'KeyB') socket.emit('playerAction', { type: 'heal' });
         if (e.code === 'KeyG') socket.emit('playerAction', { type: 'dropMine' });
@@ -270,63 +290,52 @@ function setupEventListeners() {
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
 }
 function reconcileGameState(serverState) {
-    const serverPlayerIds = Object.keys(serverState.players || {}); const clientPlayerIds = Object.keys(gameObjects.players);
+    const serverPlayerIds = Object.keys(serverState.players || {});
     for (const id of serverPlayerIds) {
-        if (!clientPlayerIds.includes(id)) {
+        if (!gameObjects.players[id]) {
             const playerData = serverState.players[id]; const tankColor = (id === localPlayerId) ? 0x38a849 : 0xcc3333;
             const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
             tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z); scene.add(tank); gameObjects.players[id] = tank;
         }
     }
-    for (const id of clientPlayerIds) { if (!serverPlayerIds.includes(id)) { scene.remove(gameObjects.players[id]); delete gameObjects.players[id]; } }
     const objectTypes = ['houses', 'toilets', 'crates', 'fences'];
     for (const type of objectTypes) {
-        const serverObjectIds = Object.keys(serverState[type] || {}); const clientObjectIds = Object.keys(gameObjects[type]);
+        const serverObjectIds = Object.keys(serverState[type] || {});
         for (const id of serverObjectIds) {
-            if (!clientObjectIds.includes(id)) {
-                const data = serverState[type][id]; let newObject;
-                if (type === 'houses') newObject = createHouse(); 
-                else if (type === 'toilets') newObject = createToilet(); 
-                else if (type === 'crates') newObject = createSupplyCrate();
-                else if (type === 'fences') newObject = createFenceSegment();
-                if (newObject) { 
-                    newObject.position.set(data.position.x, data.position.y, data.position.z); 
-                    if (data.rotationY) newObject.rotation.y = data.rotationY; 
-                    scene.add(newObject); gameObjects[type][id] = newObject; 
-                }
+            if (!gameObjects[type][id]) {
+                createObjectMesh({type: type.slice(0, -1), data: serverState[type][id]});
             }
         }
-        for (const id of clientObjectIds) { if (!serverObjectIds.includes(id)) { scene.remove(gameObjects[type][id]); delete gameObjects[type][id]; } }
     }
 }
 function createObjectMesh(payload) {
     const { type, data } = payload;
     let newMesh;
+    let container = gameObjects[type + 's'];
+
+    if(!container) return; // Nieznany typ obiektu
+    if(container[data.id]) return; // Obiekt już istnieje
 
     switch(type) {
-        case 'projectile':
-            newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 }) );
-            break;
-        case 'machineGunBullet':
-            newMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffa500 }));
-            break;
+        case 'projectile': newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 }) ); break;
+        case 'machineGunBullet': newMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffa500 })); break;
         case 'missile':
             newMesh = new THREE.Group();
             const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 12), LAMBERT_MATERIAL(0xcccccc));
             const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 12), LAMBERT_MATERIAL(0xff0000));
             tip.position.y = 1.5; newMesh.add(body, tip); newMesh.rotation.x = Math.PI / 2;
             break;
-        case 'mine':
-            newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444));
-            break;
-        case 'crate':
-            newMesh = createSupplyCrate();
-            break;
+        case 'mine': newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444)); break;
+        case 'crate': newMesh = createSupplyCrate(); break;
+        case 'toilet': newMesh = createToilet(); break;
+        case 'house': newMesh = createHouse(); break;
+        case 'fence': newMesh = createFenceSegment(); break;
     }
 
     if (newMesh) {
         newMesh.position.set(data.position.x, data.position.y, data.position.z);
-        gameObjects[type === 'projectile' ? 'projectiles' : type + 's'][data.id] = newMesh;
+        if(data.rotationY) newMesh.rotation.y = data.rotationY;
+        container[data.id] = newMesh;
         scene.add(newMesh);
     }
 }
@@ -337,12 +346,28 @@ function animate() {
     if (!isGameStarted) return;
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
+
+    // Zarządzanie cooldownem strzału
+    if (fireCooldown > 0) {
+        fireCooldown -= delta;
+    } else {
+        canFire = true;
+    }
+
+    // Ciągłe strzelanie karabinem maszynowym przy wciśniętym klawiszu
+    if(keys['Space'] || keys['Enter']) {
+        if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') {
+            handleFireInput();
+        }
+    }
+
+
     socket.emit("playerInput", keys);
 
     // Interpolacja czołgów
     for (const id in clientGameState.players) {
         const serverTank = clientGameState.players[id]; const clientTank = gameObjects.players[id];
-        if (clientTank) {
+        if (clientTank && serverTank) {
             if (serverTank.isDestroyed) { clientTank.visible = false; continue; }
             clientTank.visible = true;
             clientTank.position.lerp(new THREE.Vector3(serverTank.position.x, serverTank.position.y, serverTank.position.z), 0.25);
@@ -356,6 +381,7 @@ function animate() {
     // Interpolacja pocisków
     const projectileTypes = ['projectiles', 'machineGunBullets', 'missiles'];
     for(const type of projectileTypes) {
+        if(!clientGameState[type]) continue;
         for (const id in clientGameState[type]) {
             const serverObj = clientGameState[type][id];
             const clientObj = gameObjects[type][id];
@@ -398,8 +424,8 @@ function animate() {
     // Aktualizacja dymków
      for (const playerId in gameObjects.players) {
         const bubble = document.getElementById(`bubble-${playerId}`);
-        if (bubble && bubble.style.display !== 'none') {
-            const playerTank = gameObjects.players[playerId];
+        const playerTank = gameObjects.players[playerId];
+        if (bubble && playerTank && bubble.style.display !== 'none') {
             const vector = new THREE.Vector3(playerTank.position.x, playerTank.position.y + 6, playerTank.position.z);
             vector.project(camera);
             const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
@@ -430,17 +456,14 @@ socket.on("gameStateUpdate", (serverState) => { clientGameState = serverState; }
 socket.on('objectCreated', (payload) => {
     createObjectMesh(payload);
 });
+
 socket.on('objectDestroyed', (payload) => {
     const { type, id, hit } = payload;
-    let objectList, object;
+    let containerName = type.endsWith('y') ? type.slice(0, -1) + 'ies' : type + 's';
+    if(type === 'machineGunBullet') containerName = 'machineGunBullets';
 
-    // Determine the correct list and object
-    if (type === 'player') {
-        objectList = gameObjects.players;
-    } else {
-        objectList = gameObjects[type + 's'];
-    }
-    object = objectList ? objectList[id] : null;
+    const objectList = gameObjects[containerName];
+    const object = objectList ? objectList[id] : null;
 
     if (object) {
         if(hit) {
@@ -448,16 +471,18 @@ socket.on('objectDestroyed', (payload) => {
                 destroyObjectWithWreckage(object, [object.hullGroup, object.turret]);
                 if (Math.random() > 0.3) showTankQuote(id);
             } else if (type === 'house') {
-                 destroyObjectWithWreckage(object, object.userData.body ? [object.userData.body, object.userData.roof] : [object]);
+                 destroyObjectWithWreckage(object, [object.userData.body, object.userData.roof]);
             }
              else {
                 createExplosion(object.position, 1.5);
             }
         }
         scene.remove(object);
+        if(object.traverse) object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); c.material.dispose(); }});
         delete objectList[id];
     }
 });
+
 
 socket.on("playerConnected", (playerData) => {
     if (!isGameStarted || !scene || gameObjects.players[playerData.id]) return;
@@ -473,6 +498,8 @@ socket.on("playerConnected", (playerData) => {
 
 socket.on("playerDisconnected", (id) => {
     if (clientGameState.players && clientGameState.players[id]) { delete clientGameState.players[id]; }
+    const bubble = document.getElementById(`bubble-${id}`);
+    if(bubble) bubble.remove();
     if (gameObjects.players[id]) {
         scene.remove(gameObjects.players[id]);
         delete gameObjects.players[id];
