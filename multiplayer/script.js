@@ -1,4 +1,3 @@
-
 import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 
@@ -270,9 +269,40 @@ socket.on('objectDestroyed', (payload) => {
     }
 });
 
+socket.on("playerConnected", (playerData) => {
+    // Upewnij się, że gra jest uruchomiona i że gracz jeszcze nie istnieje po stronie klienta
+    if (!isGameStarted || !scene || gameObjects.players[playerData.id]) {
+        return;
+    }
+
+    console.log(`Nowy gracz dołączył: ${playerData.id}`);
+
+    // Dodaj nowego gracza do lokalnej kopii stanu gry
+    if (clientGameState.players) {
+        clientGameState.players[playerData.id] = playerData;
+    }
+
+    // Stwórz model 3D dla czołgu nowego gracza
+    const tankColor = 0xcc3333; // Inni gracze są zawsze czerwoni
+    const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
+    
+    // Ustaw pozycję i rotację początkową
+    tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
+    tank.rotation.y = playerData.rotation.y;
+    
+    scene.add(tank);
+    gameObjects.players[playerData.id] = tank;
+});
+
 socket.on("playerDisconnected", (id) => {
+    // Usuń gracza z lokalnej kopii stanu gry
+    if (clientGameState.players && clientGameState.players[id]) {
+        delete clientGameState.players[id];
+    }
+    // Usuń obiekt 3D gracza
     if (gameObjects.players[id]) {
-        scene.remove(gameObjects.players[id]); delete gameObjects.players[id];
+        scene.remove(gameObjects.players[id]);
+        delete gameObjects.players[id];
         console.log(`Gracz ${id} się rozłączył.`);
     }
 });
