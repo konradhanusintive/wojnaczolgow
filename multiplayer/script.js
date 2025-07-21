@@ -8,23 +8,22 @@ let clientGameState = {}; // Lokalna kopia stanu gry z serwera
 let selectionRenderers = [];
 let isGameStarted = false;
 let isSelectionScreenActive = false;
+let brickMaterial; // Globalny materiał dla cegieł
 
 const keys = {};
 let canFire = true;
 let fireCooldown = 0; // Czas w sekundach
 
 const gameObjects = {
-  players: {},
-  houses: {},
-  toilets: {},
-  crates: {},
-  fences: {},
-  mines: {},
-  missiles: {},
-  machineGunBullets: {},
-  projectiles: {},
-  particles: [],
-  wreckage: [],
+    players: {},
+    buildings: {}, // Zamiast domów, toalet itp.
+    crates: {},
+    mines: {},
+    missiles: {},
+    machineGunBullets: {},
+    projectiles: {},
+    particles: [],
+    wreckage: [],
 };
 
 const socket = io();
@@ -54,6 +53,13 @@ function createGroundTexture() {
   const canvas = document.createElement("canvas"); canvas.width = 256; canvas.height = 256; const ctx = canvas.getContext("2d"); ctx.fillStyle = "#3c581a"; ctx.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 8000; i++) { const x = Math.random() * 256; const y = Math.random() * 256; ctx.fillStyle = Math.random() > 0.7 ? "#6B8E23" : "#556B2F"; ctx.fillRect(x, y, 2, 2); }
   const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(32, 32); return texture;
+}
+function createBrickMaterial() {
+    const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#8a3d29"; ctx.fillRect(0, 0, 128, 128); ctx.strokeStyle = "#a15d4a"; ctx.lineWidth = 4;
+    ctx.strokeRect(0, 0, 128, 128); ctx.fillStyle = "rgba(0,0,0,0.1)"; ctx.fillRect(0, 0, 128, 128);
+    const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
+    return new THREE.MeshLambertMaterial({ map: texture });
 }
 function createStandardTank(color) {
     const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color);
@@ -94,14 +100,53 @@ function createAbramsTank(color) {
     turretGroup.position.y = hullHeight; tank.add(turretGroup);
     tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
 }
-function createHouse() {
-    const house = new THREE.Group(); const body = new THREE.Mesh(new THREE.BoxGeometry(14, 10, 20), LAMBERT_MATERIAL(0xac8c6c)); body.position.y = 5; house.add(body);
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0, 10, 6, 4), LAMBERT_MATERIAL(0xc05454)); roof.position.y = 10 + 3; roof.rotation.y = Math.PI / 4; house.add(roof);
-    house.userData = { body, roof }; return house;
+function createBuildingMesh(buildingData) {
+    const { id, position, brickSize, bricks } = buildingData;
+    const brickGeometry = new THREE.BoxGeometry(brickSize.x, brickSize.y, brickSize.z);
+    // Używamy jednej instancji materiału dla wszystkich budynków
+    if (!brickMaterial) {
+        brickMaterial = createBrickMaterial();
+    }
+    
+    // Używamy InstancedMesh dla ogromnej poprawy wydajności
+    const instancedMesh = new THREE.InstancedMesh(brickGeometry, brickMaterial, bricks.length);
+    instancedMesh.position.set(position.x, position.y, position.z);
+
+    const matrix = new THREE.Matrix4();
+    let instanceIdx = 0;
+    for (const brick of bricks) {
+        if (brick) { // `brick` może być `null` jeśli jest zniszczony
+            matrix.setPosition(brick.x, brick.y, brick.z);
+            instancedMesh.setMatrixAt(instanceIdx, matrix);
+        }
+        instanceIdx++;
+    }
+
+    instancedMesh.instanceMatrix.needsUpdate = true;
+    
+    // Zapisujemy oryginalne dane, aby móc je aktualizować
+    gameObjects.buildings[id] = {
+        mesh: instancedMesh,
+        data: buildingData,
+    };
+    scene.add(instancedMesh);
 }
-function createToilet() {
-    const toilet = new THREE.Group(); const body = new THREE.Mesh(new THREE.BoxGeometry(4, 7, 4), LAMBERT_MATERIAL(0x8b4513)); body.position.y = 3.5; toilet.add(body);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(5, 0.5, 5), LAMBERT_MATERIAL(0x5d3a1a)); roof.position.y = 7.25; roof.rotation.x = 0.2; toilet.add(roof); return toilet;
+function createBrickDebris(position, count) {
+    if (!brickMaterial) return;
+    const brickGeometry = new THREE.BoxGeometry(1, 0.5, 2); // Rozmiar cegły jak w serwerze
+    for (let i = 0; i < count; i++) {
+        const wreckClone = new THREE.Mesh(brickGeometry, brickMaterial);
+        wreckClone.position.copy(position);
+        
+        const wreckObject = {
+            object: wreckClone,
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 25, Math.random() * 20 + 5, (Math.random() - 0.5) * 25),
+            angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8),
+            lifespan: Math.random() * 2 + 1, // Krótszy czas życia dla odłamków
+        };
+        gameObjects.wreckage.push(wreckObject);
+        scene.add(wreckClone);
+    }
 }
 function createSupplyCrate() {
     const crate = new THREE.Group();
@@ -110,13 +155,6 @@ function createSupplyCrate() {
     ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("?", 128, 138);
     const material = new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(canvas) });
     const base = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), material); base.position.y = 1; crate.add(base); return crate;
-}
-function createFenceSegment() {
-    const segment = new THREE.Group(); const postMaterial = LAMBERT_MATERIAL(0x654321);
-    const postGeom = new THREE.BoxGeometry(0.5, 4, 0.5); const post1 = new THREE.Mesh(postGeom, postMaterial);
-    post1.position.set(-5, 2, 0); segment.add(post1); const post2 = post1.clone(); post2.position.set(5, 2, 0); segment.add(post2);
-    const barGeom = new THREE.BoxGeometry(10, 0.5, 0.2); const bar1 = new THREE.Mesh(barGeom, postMaterial);
-    bar1.position.set(0, 2.5, 0); segment.add(bar1); return segment;
 }
 function createExplosion(position, scale) {
   const particleCount = 20 * scale;
@@ -298,7 +336,15 @@ function reconcileGameState(serverState) {
             tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z); scene.add(tank); gameObjects.players[id] = tank;
         }
     }
-    const objectTypes = ['houses', 'toilets', 'crates', 'fences'];
+    // Reconcile Buildings
+    const serverBuildingIds = Object.keys(serverState.buildings || {});
+    for (const id of serverBuildingIds) {
+        if (!gameObjects.buildings[id]) {
+            createBuildingMesh(serverState.buildings[id]);
+        }
+    }
+
+    const objectTypes = ['crates']; // Only crates are left as simple objects
     for (const type of objectTypes) {
         const serverObjectIds = Object.keys(serverState[type] || {});
         for (const id of serverObjectIds) {
@@ -327,16 +373,12 @@ function createObjectMesh(payload) {
             break;
         case 'mine': newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444)); break;
         case 'crate': newMesh = createSupplyCrate(); break;
-        case 'toilet': newMesh = createToilet(); break;
-        case 'house': newMesh = createHouse(); break;
-        case 'fence': newMesh = createFenceSegment(); break;
     }
 
     if (newMesh) {
         newMesh.position.set(data.position.x, data.position.y, data.position.z);
         if(data.rotationY) newMesh.rotation.y = data.rotationY;
         container[data.id] = newMesh;
-        // Zapisz poprzednią pozycję, aby umożliwić obliczenie kierunku
         newMesh.lastPosition = new THREE.Vector3().copy(newMesh.position);
         scene.add(newMesh);
     }
@@ -374,7 +416,6 @@ function animate() {
         }
     }
     
-    // Interpolacja i rotacja pocisków
     const projectileTypes = ['projectiles', 'machineGunBullets', 'missiles'];
     for(const type of projectileTypes) {
         const container = clientGameState[type];
@@ -384,16 +425,11 @@ function animate() {
             const clientObj = gameObjects[type][id];
             if (clientObj && serverObj) {
                 const serverPos = new THREE.Vector3(serverObj.position.x, serverObj.position.y, serverObj.position.z);
-                
-                // Oblicz kierunek ruchu na podstawie ostatniej i obecnej pozycji
                 const moveDirection = serverPos.clone().sub(clientObj.lastPosition).normalize();
-                
-                // Obróć obiekt, aby "patrzył" w kierunku lotu
                 if (moveDirection.lengthSq() > 0.001) {
                     clientObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), moveDirection);
                     if (type === 'missile') clientObj.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2));
                 }
-
                 clientObj.position.lerp(serverPos, 0.5);
                 clientObj.lastPosition.copy(clientObj.position);
             }
@@ -418,9 +454,9 @@ function animate() {
         const wreck = gameObjects.wreckage[i];
         wreck.lifespan -= delta;
         if (wreck.lifespan <= 0) {
-            scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue;
+            scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); if(c.material.isMaterial) c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue;
         }
-        if (wreck.object.position.y > 0) {
+        if (wreck.object.position.y > 0 || wreck.velocity.y > 0) {
             wreck.velocity.y += wreckGravity * delta; wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
             wreck.object.rotation.x += wreck.angularVelocity.x * delta;
             wreck.object.rotation.y += wreck.angularVelocity.y * delta;
@@ -475,10 +511,7 @@ socket.on('objectDestroyed', (payload) => {
             if (type === 'player') {
                 destroyObjectWithWreckage(object, [object.hullGroup, object.turret]);
                 if (Math.random() > 0.3) showTankQuote(id);
-            } else if (type === 'house') {
-                 destroyObjectWithWreckage(object, [object.userData.body, object.userData.roof]);
-            }
-             else {
+            } else {
                 createExplosion(object.position, 1.5);
             }
         }
@@ -488,6 +521,21 @@ socket.on('objectDestroyed', (payload) => {
     }
 });
 
+socket.on('buildingDamaged', ({ buildingId, destroyedBrickIndices, impactPoint }) => {
+    const building = gameObjects.buildings[buildingId];
+    if (building) {
+        const zeroScaleMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+        for (const index of destroyedBrickIndices) {
+            building.mesh.setMatrixAt(index, zeroScaleMatrix);
+            // Zaktualizuj lokalne dane, aby nowe cegły nie były renderowane
+            building.data.bricks[index] = null;
+        }
+        building.mesh.instanceMatrix.needsUpdate = true;
+        
+        // Stwórz animowane odłamki w miejscu uderzenia
+        createBrickDebris(impactPoint, 5 + Math.floor(Math.random() * 5));
+    }
+});
 
 socket.on("playerConnected", (playerData) => {
     if (!isGameStarted || !scene || gameObjects.players[playerData.id]) return;
