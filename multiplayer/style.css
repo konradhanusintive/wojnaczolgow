@@ -226,3 +226,51 @@ canvas {
   border-style: solid;
   border-color: rgba(255, 255, 255, 0.9) transparent transparent transparent;
 }
+
+/* NOWOŚĆ: Kontener na powiadomienia o zniszczeniach */
+#kill-feed-container {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none; /* Ignoruje kliknięcia myszką */
+}
+
+/* NOWOŚĆ: Styl pojedynczego powiadomienia */
+.kill-notification {
+  background-color: rgba(20, 20, 20, 0.8);
+  border: 1px solid #ff4500;
+  border-radius: 5px;
+  padding: 8px 15px;
+  font-family: 'Arial', sans-serif;
+  font-size: 1.1em;
+  color: #fff;
+  text-shadow: 1px 1px 2px #000;
+  animation: slideInAndFadeOut 5s forwards;
+  box-shadow: 0 0 10px rgba(255, 69, 0, 0.5);
+  white-space: nowrap;
+}
+
+/* NOWOŚĆ: Animacja dla powiadomień */
+@keyframes slideInAndFadeOut {
+  0% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  15% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  85% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}

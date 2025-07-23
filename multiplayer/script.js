@@ -272,6 +272,35 @@ function showTankQuote(playerId) {
     }, 4000);
 }
 
+// Funkcja do wyświetlania powiadomień o zniszczeniach
+function displayKillNotification(attackerId, victimId) {
+    const container = document.getElementById('kill-feed-container');
+    if (!container) return;
+
+    const attackerName = attackerId === localPlayerId ? 'TY' : `Gracz ${attackerId.substring(0, 5)}`;
+    const victimName = victimId === localPlayerId ? 'Ciebie' : `gracza ${victimId.substring(0, 5)}`;
+
+    const messages = [
+        `🤠 ${attackerName} wysłał ${victimName} na złom! 💥`,
+        `💣 ${attackerName} zrobił z ${victimName} konfetti! 🎉`,
+        `🔥 ${attackerName} podgrzał atmosferę, eliminując ${victimName}!`,
+        `🚀 ${attackerName} pokazał ${victimName}, gdzie raki zimują! 🦀`,
+        `🎯 ${attackerName} trafia w dziesiątkę... a ${victimName} w pył! 💨`
+    ];
+    
+    const message = messages[Math.floor(Math.random() * messages.length)];
+
+    const notificationElement = document.createElement('div');
+    notificationElement.className = 'kill-notification';
+    notificationElement.innerHTML = message;
+
+    container.appendChild(notificationElement);
+
+    setTimeout(() => {
+        notificationElement.remove();
+    }, 5000); // Czas musi odpowiadać animacji CSS
+}
+
 
 // --- LOGIKA GRY (KLIENT) ---
 function initGame(payload) {
@@ -558,6 +587,11 @@ socket.on("playerDisconnected", (id) => {
         delete gameObjects.players[id];
         console.log(`Gracz ${id} się rozłączył.`);
     }
+});
+
+// Obsługa powiadomień o zniszczeniu
+socket.on('killNotification', ({ attackerId, victimId }) => {
+    displayKillNotification(attackerId, victimId);
 });
 
 // --- START APLIKACJI ---

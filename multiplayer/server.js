@@ -1,4 +1,3 @@
-
 // server.js
 const express = require("express");
 const http = require("http");
@@ -50,10 +49,12 @@ function handleDamage(player, amount, attackerId) {
     player.health -= amount;
     if (player.health <= 0) {
         player.isDestroyed = true;
-        player.respawnTimer = 5.0;
+        player.respawnTimer = 3.0; // ZMIANA: Czas odrodzenia ustawiony na 3 sekundy
         const owner = gameState.players[attackerId];
         if (owner && owner.id !== player.id) {
              owner.score++;
+             // NOWOŚĆ: Wyślij powiadomienie o zniszczeniu do wszystkich graczy
+             io.emit('killNotification', { attackerId: owner.id, victimId: player.id });
         }
         io.emit('objectDestroyed', { type: 'player', id: player.id, attackerId: attackerId, hit: true });
     }
