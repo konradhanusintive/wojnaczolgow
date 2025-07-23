@@ -16,7 +16,7 @@ let fireCooldown = 0; // Czas w sekundach
 
 const gameObjects = {
     players: {},
-    buildings: {}, // Zamiast domów, toalet itp.
+    buildings: {},
     crates: {},
     mines: {},
     missiles: {},
@@ -103,46 +103,33 @@ function createAbramsTank(color) {
 function createBuildingMesh(buildingData) {
     const { id, position, brickSize, bricks } = buildingData;
     const brickGeometry = new THREE.BoxGeometry(brickSize.x, brickSize.y, brickSize.z);
-    // Używamy jednej instancji materiału dla wszystkich budynków
-    if (!brickMaterial) {
-        brickMaterial = createBrickMaterial();
-    }
-    
-    // Używamy InstancedMesh dla ogromnej poprawy wydajności
+    if (!brickMaterial) { brickMaterial = createBrickMaterial(); }
     const instancedMesh = new THREE.InstancedMesh(brickGeometry, brickMaterial, bricks.length);
     instancedMesh.position.set(position.x, position.y, position.z);
-
     const matrix = new THREE.Matrix4();
     let instanceIdx = 0;
     for (const brick of bricks) {
-        if (brick) { // `brick` może być `null` jeśli jest zniszczony
+        if (brick) {
             matrix.setPosition(brick.x, brick.y, brick.z);
             instancedMesh.setMatrixAt(instanceIdx, matrix);
         }
         instanceIdx++;
     }
-
     instancedMesh.instanceMatrix.needsUpdate = true;
-    
-    // Zapisujemy oryginalne dane, aby móc je aktualizować
-    gameObjects.buildings[id] = {
-        mesh: instancedMesh,
-        data: buildingData,
-    };
+    gameObjects.buildings[id] = { mesh: instancedMesh, data: buildingData, };
     scene.add(instancedMesh);
 }
 function createBrickDebris(position, count) {
     if (!brickMaterial) return;
-    const brickGeometry = new THREE.BoxGeometry(1, 0.5, 2); // Rozmiar cegły jak w serwerze
+    const brickGeometry = new THREE.BoxGeometry(1, 0.5, 2);
     for (let i = 0; i < count; i++) {
         const wreckClone = new THREE.Mesh(brickGeometry, brickMaterial);
         wreckClone.position.copy(position);
-        
         const wreckObject = {
             object: wreckClone,
             velocity: new THREE.Vector3((Math.random() - 0.5) * 25, Math.random() * 20 + 5, (Math.random() - 0.5) * 25),
             angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8),
-            lifespan: Math.random() * 2 + 1, // Krótszy czas życia dla odłamków
+            lifespan: Math.random() * 2 + 1,
         };
         gameObjects.wreckage.push(wreckObject);
         scene.add(wreckClone);
@@ -186,6 +173,24 @@ function destroyObjectWithWreckage(object, parts) {
         gameObjects.wreckage.push(wreckObject);
     });
 }
+// NOWOŚĆ: Funkcja tworząca flagę punktu odrodzenia
+function createSpawnMarker() {
+    const marker = new THREE.Group();
+    const poleGeo = new THREE.CylinderGeometry(0.2, 0.2, 8, 8);
+    const poleMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.y = 4;
+    marker.add(pole);
+
+    const flagGeo = new THREE.PlaneGeometry(3, 2);
+    const flagMat = new THREE.MeshBasicMaterial({ color: 0x1E90FF, side: THREE.DoubleSide });
+    const flag = new THREE.Mesh(flagGeo, flagMat);
+    flag.position.set(1.5, 6.5, 0);
+    marker.add(flag);
+    
+    return marker;
+}
+
 
 // --- LOGIKA UI ---
 function initializeUI() {
@@ -272,7 +277,6 @@ function showTankQuote(playerId) {
     }, 4000);
 }
 
-// Funkcja do wyświetlania powiadomień o zniszczeniach
 function displayKillNotification(attackerId, victimId) {
     const container = document.getElementById('kill-feed-container');
     if (!container) return;
@@ -298,7 +302,7 @@ function displayKillNotification(attackerId, victimId) {
 
     setTimeout(() => {
         notificationElement.remove();
-    }, 5000); // Czas musi odpowiadać animacji CSS
+    }, 5000); 
 }
 
 
@@ -310,6 +314,16 @@ function initGame(payload) {
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
+    
+    // NOWOŚĆ: Narysuj flagi w punktach odrodzenia
+    if (payload.spawnPoints) {
+        for(const sp of payload.spawnPoints) {
+            const marker = createSpawnMarker();
+            marker.position.set(sp.x, 0, sp.z);
+            scene.add(marker);
+        }
+    }
+
     reconcileGameState(clientGameState);
     setupEventListeners();
     animate();
@@ -365,15 +379,12 @@ function reconcileGameState(serverState) {
             tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z); scene.add(tank); gameObjects.players[id] = tank;
         }
     }
-    // Reconcile Buildings
     const serverBuildingIds = Object.keys(serverState.buildings || {});
     for (const id of serverBuildingIds) {
-        if (!gameObjects.buildings[id]) {
-            createBuildingMesh(serverState.buildings[id]);
-        }
+        if (!gameObjects.buildings[id]) { createBuildingMesh(serverState.buildings[id]); }
     }
 
-    const objectTypes = ['crates']; // Only crates are left as simple objects
+    const objectTypes = ['crates'];
     for (const type of objectTypes) {
         const serverObjectIds = Object.keys(serverState[type] || {});
         for (const id of serverObjectIds) {
@@ -387,10 +398,7 @@ function createObjectMesh(payload) {
     const { type, data } = payload;
     let newMesh;
     let container = gameObjects[type + 's'];
-
-    if(!container) return;
-    if(container[data.id]) return;
-
+    if(!container) return; if(container[data.id]) return;
     switch(type) {
         case 'projectile': newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 }) ); break;
         case 'machineGunBullet': newMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffa500 })); break;
@@ -398,12 +406,10 @@ function createObjectMesh(payload) {
             newMesh = new THREE.Group();
             const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 12), LAMBERT_MATERIAL(0xcccccc));
             const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 12), LAMBERT_MATERIAL(0xff0000));
-            tip.position.y = 1.5; newMesh.add(body, tip);
-            break;
+            tip.position.y = 1.5; newMesh.add(body, tip); break;
         case 'mine': newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444)); break;
         case 'crate': newMesh = createSupplyCrate(); break;
     }
-
     if (newMesh) {
         newMesh.position.set(data.position.x, data.position.y, data.position.z);
         if(data.rotationY) newMesh.rotation.y = data.rotationY;
@@ -419,15 +425,9 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    if (fireCooldown > 0) {
-        fireCooldown -= delta;
-    } else {
-        canFire = true;
-    }
+    if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
     if(keys['Space'] || keys['Enter']) {
-        if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') {
-            handleFireInput();
-        }
+        if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') { handleFireInput(); }
     }
 
     socket.emit("playerInput", keys);
@@ -435,7 +435,10 @@ function animate() {
     for (const id in clientGameState.players) {
         const serverTank = clientGameState.players[id]; const clientTank = gameObjects.players[id];
         if (clientTank && serverTank) {
-            if (serverTank.isDestroyed) { clientTank.visible = false; continue; }
+            if (serverTank.isDestroyed) {
+                clientTank.visible = false;
+                continue;
+            }
             clientTank.visible = true;
             clientTank.position.lerp(new THREE.Vector3(serverTank.position.x, serverTank.position.y, serverTank.position.z), 0.25);
             const targetQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.rotation.y, 0));
@@ -450,8 +453,7 @@ function animate() {
         const container = clientGameState[type];
         if(!container) continue;
         for (const id in container) {
-            const serverObj = container[id];
-            const clientObj = gameObjects[type][id];
+            const serverObj = container[id]; const clientObj = gameObjects[type][id];
             if (clientObj && serverObj) {
                 const serverPos = new THREE.Vector3(serverObj.position.x, serverObj.position.y, serverObj.position.z);
                 const moveDirection = serverPos.clone().sub(clientObj.lastPosition).normalize();
@@ -471,20 +473,15 @@ function animate() {
     for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
         const p = gameObjects.particles[i];
         p.lifespan -= delta;
-        if (p.lifespan <= 0) {
-            scene.remove(p); p.geometry.dispose(); p.material.dispose(); gameObjects.particles.splice(i, 1);
-        } else {
-            p.velocity.y += gravity * delta; p.position.add(p.velocity.clone().multiplyScalar(delta));
-        }
+        if (p.lifespan <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); gameObjects.particles.splice(i, 1);
+        } else { p.velocity.y += gravity * delta; p.position.add(p.velocity.clone().multiplyScalar(delta)); }
     }
 
     const wreckGravity = -30;
     for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
         const wreck = gameObjects.wreckage[i];
         wreck.lifespan -= delta;
-        if (wreck.lifespan <= 0) {
-            scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); if(c.material.isMaterial) c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue;
-        }
+        if (wreck.lifespan <= 0) { scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); if(c.material.isMaterial) c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue; }
         if (wreck.object.position.y > 0 || wreck.velocity.y > 0) {
             wreck.velocity.y += wreckGravity * delta; wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
             wreck.object.rotation.x += wreck.angularVelocity.x * delta;
@@ -494,15 +491,13 @@ function animate() {
     }
 
      for (const playerId in gameObjects.players) {
-        const bubble = document.getElementById(`bubble-${playerId}`);
-        const playerTank = gameObjects.players[playerId];
+        const bubble = document.getElementById(`bubble-${playerId}`); const playerTank = gameObjects.players[playerId];
         if (bubble && playerTank && bubble.style.display !== 'none') {
             const vector = new THREE.Vector3(playerTank.position.x, playerTank.position.y + 6, playerTank.position.z);
             vector.project(camera);
             const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
             const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
-            bubble.style.left = `${x}px`;
-            bubble.style.top = `${y}px`;
+            bubble.style.left = `${x}px`; bubble.style.top = `${y}px`;
         }
     }
 
@@ -517,15 +512,11 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-
 // --- OBSŁUGA ZDARZEŃ Z SERWERA ---
 socket.on("connect", () => console.log("Połączono z serwerem!", socket.id));
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
 socket.on("gameStateUpdate", (serverState) => { clientGameState = serverState; });
-
-socket.on('objectCreated', (payload) => {
-    createObjectMesh(payload);
-});
+socket.on('objectCreated', (payload) => { createObjectMesh(payload); });
 
 socket.on('objectDestroyed', (payload) => {
     const { type, id, hit } = payload;
@@ -536,7 +527,7 @@ socket.on('objectDestroyed', (payload) => {
     const object = objectList ? objectList[id] : null;
 
     if (object) {
-        if(hit) {
+        if (hit) {
             if (type === 'player') {
                 destroyObjectWithWreckage(object, [object.hullGroup, object.turret]);
                 if (Math.random() > 0.3) showTankQuote(id);
@@ -544,9 +535,11 @@ socket.on('objectDestroyed', (payload) => {
                 createExplosion(object.position, 1.5);
             }
         }
-        scene.remove(object);
-        if(object.traverse) object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); c.material.dispose(); }});
-        delete objectList[id];
+        if (type !== 'player') {
+            scene.remove(object);
+            if(object.traverse) object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); c.material.dispose(); }});
+            delete objectList[id];
+        }
     }
 });
 
@@ -556,16 +549,12 @@ socket.on('buildingDamaged', ({ buildingId, destroyedBrickIndices, impactPoint }
         const zeroScaleMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
         for (const index of destroyedBrickIndices) {
             building.mesh.setMatrixAt(index, zeroScaleMatrix);
-            // Zaktualizuj lokalne dane, aby nowe cegły nie były renderowane
             building.data.bricks[index] = null;
         }
         building.mesh.instanceMatrix.needsUpdate = true;
-        
-        // Stwórz animowane odłamki w miejscu uderzenia
         createBrickDebris(impactPoint, 5 + Math.floor(Math.random() * 5));
     }
 });
-
 socket.on("playerConnected", (playerData) => {
     if (!isGameStarted || !scene || gameObjects.players[playerData.id]) return;
     console.log(`Nowy gracz dołączył: ${playerData.id}`);
@@ -577,7 +566,6 @@ socket.on("playerConnected", (playerData) => {
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
 });
-
 socket.on("playerDisconnected", (id) => {
     if (clientGameState.players && clientGameState.players[id]) { delete clientGameState.players[id]; }
     const bubble = document.getElementById(`bubble-${id}`);
@@ -588,8 +576,6 @@ socket.on("playerDisconnected", (id) => {
         console.log(`Gracz ${id} się rozłączył.`);
     }
 });
-
-// Obsługa powiadomień o zniszczeniu
 socket.on('killNotification', ({ attackerId, victimId }) => {
     displayKillNotification(attackerId, victimId);
 });

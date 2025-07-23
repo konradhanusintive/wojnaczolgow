@@ -14,6 +14,15 @@ const MAP_SIZE = 500;
 const PLAYER_COLLISION_RADIUS = 7;
 const POWERUP_TYPES = ["turbo", "machinegun", "missile", "mines"];
 
+// NOWOŚĆ: Stałe punkty odrodzenia i promień bezpieczeństwa
+const SPAWN_POINTS = [
+    { x: 200, z: 0 },   { x: -200, z: 0 },
+    { x: 0, z: 200 },   { x: 0, z: -200 },
+    { x: 141, z: 141 }, { x: -141, z: -141 },
+    { x: 141, z: -141 },{ x: -141, z: 141 }
+];
+const SPAWN_CLEARANCE_RADIUS = 35; 
+
 // --- Stałe generacji miasta ---
 const CITY_GRID_SIZE = 20; // Liczba komórek siatki miasta
 const CITY_CELL_SIZE = 30; // Rozmiar każdej komórki w jednostkach świata
@@ -49,11 +58,10 @@ function handleDamage(player, amount, attackerId) {
     player.health -= amount;
     if (player.health <= 0) {
         player.isDestroyed = true;
-        player.respawnTimer = 3.0; // ZMIANA: Czas odrodzenia ustawiony na 3 sekundy
+        player.respawnTimer = 3.0; 
         const owner = gameState.players[attackerId];
         if (owner && owner.id !== player.id) {
              owner.score++;
-             // NOWOŚĆ: Wyślij powiadomienie o zniszczeniu do wszystkich graczy
              io.emit('killNotification', { attackerId: owner.id, victimId: player.id });
         }
         io.emit('objectDestroyed', { type: 'player', id: player.id, attackerId: attackerId, hit: true });
@@ -180,8 +188,12 @@ function gameLoop() {
             player.respawnTimer -= delta;
             if (player.respawnTimer <= 0) {
                 const tankData = TANKS_DATA[player.tankType];
-                player.health = tankData.stats.hp; player.ammo = 8; player.isDestroyed = false;
-                player.position = { x: (Math.random() - 0.5) * (MAP_SIZE * 0.8), y: tankData.startY, z: (Math.random() - 0.5) * (MAP_SIZE * 0.8) };
+                player.health = tankData.stats.hp; 
+                player.ammo = 8; 
+                player.isDestroyed = false;
+                // NOWOŚĆ: Wybierz bezpieczny punkt odrodzenia
+                const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
+                player.position = { x: spawnPoint.x, y: tankData.startY, z: spawnPoint.z };
             }
             continue;
         }
@@ -193,7 +205,6 @@ function gameLoop() {
         const oldPos = { ...player.position };
         const moveVector = { x: 0, z: 0 };
 
-        // --- Oblicz wektor ruchu i rotację ---
         if (player.keys.KeyW || player.keys.ArrowUp) {
             moveVector.x += Math.sin(player.rotation.y) * moveSpeed;
             moveVector.z += Math.cos(player.rotation.y) * moveSpeed;
@@ -205,34 +216,22 @@ function gameLoop() {
         if (player.keys.KeyA || player.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
         if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
 
-        // --- Aktualizacja pozycji z kolizją (NOWA LOGIKA) ---
         if (moveVector.x !== 0 || moveVector.z !== 0) {
             const newPosX = oldPos.x + moveVector.x;
             const newPosZ = oldPos.z + moveVector.z;
-
-            // Przesuń w osi X
             player.position.x = newPosX;
-            if (checkPlayerBuildingCollision(player)) {
-                player.position.x = oldPos.x; // Cofnij ruch, jeśli jest kolizja
-            }
-
-            // Przesuń w osi Z
+            if (checkPlayerBuildingCollision(player)) { player.position.x = oldPos.x; }
             player.position.z = newPosZ;
-            if (checkPlayerBuildingCollision(player)) {
-                player.position.z = oldPos.z; // Cofnij ruch, jeśli jest kolizja
-            }
+            if (checkPlayerBuildingCollision(player)) { player.position.z = oldPos.z; }
         }
         
-        // --- Kontrola wieżyczki ---
         if (player.keys.KeyQ || player.keys.BracketLeft) player.turretRotation.y += rotateSpeed;
         if (player.keys.KeyE || player.keys.BracketRight) player.turretRotation.y -= rotateSpeed;
         if ((player.keys.KeyF || player.keys.Semicolon) && player.mantletRotation.x > -0.5) player.mantletRotation.x -= rotateSpeed * 0.5;
         if ((player.keys.KeyV || player.keys.Quote) && player.mantletRotation.x < 0.2) player.mantletRotation.x += rotateSpeed * 0.5;
 
-        // Ograniczenie mapy i utonięcie
         if (Math.abs(player.position.x) > MAP_SIZE / 2 || Math.abs(player.position.z) > MAP_SIZE / 2) { handleDamage(player, 9999, id); }
 
-        // Kolizje z innymi graczami
         for (const otherId in gameState.players) {
             if (id === otherId) continue; const otherPlayer = gameState.players[otherId]; if (otherPlayer.isDestroyed) continue;
             const dist = Math.sqrt((player.position.x - otherPlayer.position.x) ** 2 + (player.position.z - otherPlayer.position.z) ** 2);
@@ -242,7 +241,6 @@ function gameLoop() {
             }
         }
 
-        // Kolizje ze "znajdźkami"
         for (const crateId in gameState.crates) {
             const crate = gameState.crates[crateId];
             const dist = Math.sqrt((player.position.x - crate.position.x) ** 2 + (player.position.z - crate.position.z) ** 2);
@@ -253,7 +251,6 @@ function gameLoop() {
         }
     }
 
-  // --- Aktualizacja Pocisków i kolizje z budynkami ---
   const allProjectiles = [
       { list: gameState.projectiles, type: 'projectile' }, { list: gameState.machineGunBullets, type: 'machineGunBullet' }
   ];
@@ -297,7 +294,6 @@ function gameLoop() {
     }
   }
   
-  // Reszta pętli gry (rakiety, miny, powerupy) bez zmian...
   for (const id in gameState.missiles) {
       const m = gameState.missiles[id]; m.lifespan -= delta; let targetPlayer = null; let minDistance = Infinity;
       for(const pId in gameState.players) {
@@ -326,13 +322,28 @@ function gameLoop() {
       const player = gameState.players[id];
       if (player.powerUpTimer > 0) { player.powerUpTimer -= delta; if (player.powerUpTimer <= 0) { deactivatePowerUp(id); } }
   }
+
+  // NOWOŚĆ: Sprawdzanie odległości od punktów odrodzenia przy tworzeniu skrzynki
   if (Object.keys(gameState.crates).length < 3) {
       crateSpawnTimer -= delta;
       if (crateSpawnTimer <= 0) {
           const crateId = `crate_${nextObjectId++}`;
+          let cratePos;
+          let isSafe = false;
+          while(!isSafe) {
+              isSafe = true;
+              cratePos = { x: (Math.random() - 0.5) * (MAP_SIZE - 40), y: 0, z: (Math.random() - 0.5) * (MAP_SIZE - 40) };
+              for(const sp of SPAWN_POINTS) {
+                  const dist = Math.sqrt((cratePos.x - sp.x)**2 + (cratePos.z - sp.z)**2);
+                  if (dist < SPAWN_CLEARANCE_RADIUS) {
+                      isSafe = false;
+                      break;
+                  }
+              }
+          }
+
           gameState.crates[crateId] = {
-              id: crateId,
-              position: { x: (Math.random() - 0.5) * (MAP_SIZE - 40), y: 0, z: (Math.random() - 0.5) * (MAP_SIZE - 40) },
+              id: crateId, position: cratePos,
               powerUpType: POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]
           };
           io.emit('objectCreated', {type: 'crate', data: gameState.crates[crateId]}); crateSpawnTimer = 15.0;
@@ -344,50 +355,36 @@ function gameLoop() {
 
 // --- Funkcja sprawdzania kolizji gracza z budynkami ---
 function checkPlayerBuildingCollision(player) {
-    const playerRadius = 3.5; // Mniejszy promień dla precyzyjnej kolizji z cegłami
+    const playerRadius = 3.5;
     for (const buildingId in gameState.buildings) {
         const building = gameState.buildings[buildingId];
         const { position: bPos, dimensions: bDim } = building;
 
-        // Faza szeroka: Sprawdź, czy gracz jest w ogóle w pobliżu budynku
         if (player.position.x + playerRadius < bPos.x - bDim.x / 2 ||
             player.position.x - playerRadius > bPos.x + bDim.x / 2 ||
             player.position.z + playerRadius < bPos.z - bDim.z / 2 ||
             player.position.z - playerRadius > bPos.z + bDim.z / 2) {
-            continue; // Gracz jest za daleko, pomiń ten budynek
+            continue; 
         }
 
-        // Faza wąska: Sprawdź kolizję z poszczególnymi cegłami
         for (const brick of building.bricks) {
-            if (!brick) continue; // Pomiń zniszczone cegły
-
-            const brickWorldPos = {
-                x: bPos.x + brick.x,
-                y: bPos.y + brick.y,
-                z: bPos.z + brick.z,
-            };
-
+            if (!brick) continue;
+            const brickWorldPos = { x: bPos.x + brick.x, y: bPos.y + brick.y, z: bPos.z + brick.z, };
             const brickAABB = {
                 minX: brickWorldPos.x - BRICK_SIZE.x / 2, maxX: brickWorldPos.x + BRICK_SIZE.x / 2,
                 minY: brickWorldPos.y - BRICK_SIZE.y / 2, maxY: brickWorldPos.y + BRICK_SIZE.y / 2,
                 minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z + BRICK_SIZE.z / 2,
             };
 
-            // Sprawdzenie kolizji AABB (gracz) vs AABB (cegła)
-            if (player.position.x + playerRadius > brickAABB.minX &&
-                player.position.x - playerRadius < brickAABB.maxX &&
-                0 < brickAABB.maxY && // Sprawdzenie pionowe
-                PLAYER_HEIGHT > brickAABB.minY &&
-                player.position.z + playerRadius > brickAABB.minZ &&
-                player.position.z - playerRadius < brickAABB.maxZ)
-            {
-                return true; // Kolizja wykryta
+            if (player.position.x + playerRadius > brickAABB.minX && player.position.x - playerRadius < brickAABB.maxX &&
+                0 < brickAABB.maxY && PLAYER_HEIGHT > brickAABB.minY &&
+                player.position.z + playerRadius > brickAABB.minZ && player.position.z - playerRadius < brickAABB.maxZ) {
+                return true;
             }
         }
     }
-    return false; // Brak kolizji
+    return false;
 }
-
 
 // --- Tworzenie świata i połączenia ---
 function createProceduralCity() {
@@ -395,17 +392,31 @@ function createProceduralCity() {
     for (let i = 0; i < CITY_GRID_SIZE; i++) {
         for (let j = 0; j < CITY_GRID_SIZE; j++) {
             if (Math.random() < BUILDING_PROBABILITY) {
-                const id = `bld_${nextObjectId++}`;
-                const floors = BUILDING_MIN_FLOORS + Math.floor(Math.random() * (BUILDING_MAX_FLOORS - BUILDING_MIN_FLOORS));
-                const widthBricks = 5 + Math.floor(Math.random() * 5);
-                const depthBricks = 5 + Math.floor(Math.random() * 5);
-                const dimensions = { x: widthBricks * BRICK_SIZE.x, y: floors * BRICK_SIZE.y, z: depthBricks * BRICK_SIZE.z };
                 const position = {
                     x: cityOrigin.x + i * CITY_CELL_SIZE + CITY_CELL_SIZE / 2,
                     y: 0,
                     z: cityOrigin.z + j * CITY_CELL_SIZE + CITY_CELL_SIZE / 2,
                 };
-                if (Math.sqrt(position.x**2 + position.z**2) < 50) continue;
+                
+                // NOWOŚĆ: Sprawdzenie, czy pozycja budynku nie jest zbyt blisko punktu odrodzenia
+                let isTooCloseToSpawn = false;
+                for(const sp of SPAWN_POINTS) {
+                    const distance = Math.sqrt((position.x - sp.x)**2 + (position.z - sp.z)**2);
+                    if (distance < SPAWN_CLEARANCE_RADIUS + CITY_CELL_SIZE / 2) { // Dodajemy margines wielkości komórki
+                        isTooCloseToSpawn = true;
+                        break;
+                    }
+                }
+                if (isTooCloseToSpawn || Math.sqrt(position.x**2 + position.z**2) < 50) {
+                    continue; // Pomiń generowanie tego budynku
+                }
+                
+                const id = `bld_${nextObjectId++}`;
+                const floors = BUILDING_MIN_FLOORS + Math.floor(Math.random() * (BUILDING_MAX_FLOORS - BUILDING_MIN_FLOORS));
+                const widthBricks = 5 + Math.floor(Math.random() * 5);
+                const depthBricks = 5 + Math.floor(Math.random() * 5);
+                const dimensions = { x: widthBricks * BRICK_SIZE.x, y: floors * BRICK_SIZE.y, z: depthBricks * BRICK_SIZE.z };
+                
                 const bricks = [];
                 for (let y = 0; y < floors; y++) {
                     for (let x = 0; x < widthBricks; x++) {
@@ -433,14 +444,25 @@ io.on("connection", (socket) => {
   socket.on("selectTank", (tankType) => {
     if (gameState.players[socket.id] || !TANKS_DATA[tankType]) return;
     const tankData = TANKS_DATA[tankType];
-    const startPos = { x: (Math.random() - 0.5) * 40, y: tankData.startY, z: (Math.random() - 0.5) * 40 };
+
+    // NOWOŚĆ: Wybierz bezpieczny punkt startowy
+    const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
+    const startPos = { x: spawnPoint.x, y: tankData.startY, z: spawnPoint.z };
+
     gameState.players[socket.id] = {
       id: socket.id, tankType: tankType, position: startPos, rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 }, turretRotation: { x: 0, y: 0, z: 0 },
       mantletRotation: { x: 0, y: 0, z: 0 }, health: tankData.stats.hp, maxHealth: tankData.stats.hp, ammo: 8, medkits: 3, score: 0,
       isReloading: false, isDestroyed: false, respawnTimer: 0, keys: {},
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
     };
-    socket.emit("gameStarted", { playerId: socket.id, initialState: gameState, });
+    
+    // NOWOŚĆ: Wyślij punkty odrodzenia do klienta
+    socket.emit("gameStarted", { 
+        playerId: socket.id, 
+        initialState: gameState,
+        spawnPoints: SPAWN_POINTS
+    });
+    
     socket.broadcast.emit("playerConnected", gameState.players[socket.id]);
     console.log(`Gracz ${socket.id} wybrał czołg ${tankType}.`);
   });
