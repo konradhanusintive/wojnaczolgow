@@ -14,7 +14,6 @@ const MAP_SIZE = 500;
 const PLAYER_COLLISION_RADIUS = 7;
 const POWERUP_TYPES = ["turbo", "machinegun", "missile", "mines"];
 
-// NOWOŚĆ: Stałe punkty odrodzenia i promień bezpieczeństwa
 const SPAWN_POINTS = [
     { x: 200, z: 0 },   { x: -200, z: 0 },
     { x: 0, z: 200 },   { x: 0, z: -200 },
@@ -24,13 +23,13 @@ const SPAWN_POINTS = [
 const SPAWN_CLEARANCE_RADIUS = 35; 
 
 // --- Stałe generacji miasta ---
-const CITY_GRID_SIZE = 20; // Liczba komórek siatki miasta
-const CITY_CELL_SIZE = 30; // Rozmiar każdej komórki w jednostkach świata
-const BUILDING_PROBABILITY = 0.5; // Szansa na pojawienie się budynku w komórce
+const CITY_GRID_SIZE = 20;
+const CITY_CELL_SIZE = 30;
+const BUILDING_PROBABILITY = 0.5;
 const BUILDING_MIN_FLOORS = 2;
 const BUILDING_MAX_FLOORS = 8;
 const BRICK_SIZE = { x: 2.0, y: 1.0, z: 4.0 };
-const PLAYER_HEIGHT = 4.0; // Przybliżona wysokość czołgu do testów kolizji
+const PLAYER_HEIGHT = 4.0;
 
 const TANKS_DATA = {
   pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 22, speed: 18, turretRot: 1.8 }, startY: 1.0 },
@@ -191,7 +190,6 @@ function gameLoop() {
                 player.health = tankData.stats.hp; 
                 player.ammo = 8; 
                 player.isDestroyed = false;
-                // NOWOŚĆ: Wybierz bezpieczny punkt odrodzenia
                 const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
                 player.position = { x: spawnPoint.x, y: tankData.startY, z: spawnPoint.z };
             }
@@ -322,8 +320,7 @@ function gameLoop() {
       const player = gameState.players[id];
       if (player.powerUpTimer > 0) { player.powerUpTimer -= delta; if (player.powerUpTimer <= 0) { deactivatePowerUp(id); } }
   }
-
-  // NOWOŚĆ: Sprawdzanie odległości od punktów odrodzenia przy tworzeniu skrzynki
+  
   if (Object.keys(gameState.crates).length < 3) {
       crateSpawnTimer -= delta;
       if (crateSpawnTimer <= 0) {
@@ -398,17 +395,16 @@ function createProceduralCity() {
                     z: cityOrigin.z + j * CITY_CELL_SIZE + CITY_CELL_SIZE / 2,
                 };
                 
-                // NOWOŚĆ: Sprawdzenie, czy pozycja budynku nie jest zbyt blisko punktu odrodzenia
                 let isTooCloseToSpawn = false;
                 for(const sp of SPAWN_POINTS) {
                     const distance = Math.sqrt((position.x - sp.x)**2 + (position.z - sp.z)**2);
-                    if (distance < SPAWN_CLEARANCE_RADIUS + CITY_CELL_SIZE / 2) { // Dodajemy margines wielkości komórki
+                    if (distance < SPAWN_CLEARANCE_RADIUS + CITY_CELL_SIZE / 2) {
                         isTooCloseToSpawn = true;
                         break;
                     }
                 }
                 if (isTooCloseToSpawn || Math.sqrt(position.x**2 + position.z**2) < 50) {
-                    continue; // Pomiń generowanie tego budynku
+                    continue;
                 }
                 
                 const id = `bld_${nextObjectId++}`;
@@ -438,14 +434,12 @@ function createProceduralCity() {
     console.log(`Świat gry został stworzony: ${Object.keys(gameState.buildings).length} budynków.`);
 }
 
-
 io.on("connection", (socket) => {
   console.log(`Gracz połączony: ${socket.id}`);
   socket.on("selectTank", (tankType) => {
     if (gameState.players[socket.id] || !TANKS_DATA[tankType]) return;
     const tankData = TANKS_DATA[tankType];
 
-    // NOWOŚĆ: Wybierz bezpieczny punkt startowy
     const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
     const startPos = { x: spawnPoint.x, y: tankData.startY, z: spawnPoint.z };
 
@@ -456,7 +450,6 @@ io.on("connection", (socket) => {
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
     };
     
-    // NOWOŚĆ: Wyślij punkty odrodzenia do klienta
     socket.emit("gameStarted", { 
         playerId: socket.id, 
         initialState: gameState,

@@ -4,15 +4,16 @@ import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 // --- ZMIENNE GLOBALNE I KONFIGURACJA KLIENTA ---
 let scene, renderer, clock, camera;
 let localPlayerId = null;
-let clientGameState = {}; // Lokalna kopia stanu gry z serwera
+let clientGameState = {};
 let selectionRenderers = [];
 let isGameStarted = false;
 let isSelectionScreenActive = false;
-let brickMaterial; // Globalny materiał dla cegieł
+let brickMaterial;
+let greySmokeMaterial, blackSmokeMaterial;
 
 const keys = {};
 let canFire = true;
-let fireCooldown = 0; // Czas w sekundach
+let fireCooldown = 0;
 
 const gameObjects = {
     players: {},
@@ -24,6 +25,7 @@ const gameObjects = {
     projectiles: {},
     particles: [],
     wreckage: [],
+    smokeParticles: [], 
 };
 
 const socket = io();
@@ -173,7 +175,6 @@ function destroyObjectWithWreckage(object, parts) {
         gameObjects.wreckage.push(wreckObject);
     });
 }
-// NOWOŚĆ: Funkcja tworząca flagę punktu odrodzenia
 function createSpawnMarker() {
     const marker = new THREE.Group();
     const poleGeo = new THREE.CylinderGeometry(0.2, 0.2, 8, 8);
@@ -181,14 +182,49 @@ function createSpawnMarker() {
     const pole = new THREE.Mesh(poleGeo, poleMat);
     pole.position.y = 4;
     marker.add(pole);
-
     const flagGeo = new THREE.PlaneGeometry(3, 2);
     const flagMat = new THREE.MeshBasicMaterial({ color: 0x1E90FF, side: THREE.DoubleSide });
     const flag = new THREE.Mesh(flagGeo, flagMat);
     flag.position.set(1.5, 6.5, 0);
     marker.add(flag);
-    
     return marker;
+}
+
+// NOWOŚĆ: Funkcje związane z dymem
+function createSmokeTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+    return new THREE.CanvasTexture(canvas);
+}
+function emitSmokeParticle(tank, material) {
+    const smokeOffset = new THREE.Vector3(0, 1.5, 4.5); // Offset do tyłu czołgu
+    smokeOffset.applyQuaternion(tank.quaternion);
+    const smokePos = new THREE.Vector3().copy(tank.position).add(smokeOffset);
+
+    const startSize = 1.5 + Math.random() * 1;
+    const endSize = startSize * 4;
+
+    const particle = {
+        mesh: new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material.clone()),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.8, Math.random() * 2 + 1, (Math.random() - 0.5) * 0.8),
+        lifespan: Math.random() * 2 + 2,
+        initialLifespan: 0,
+        startSize,
+        endSize
+    };
+    particle.initialLifespan = particle.lifespan;
+    particle.mesh.position.copy(smokePos);
+    particle.mesh.scale.set(startSize, startSize, startSize);
+    
+    gameObjects.smokeParticles.push(particle);
+    scene.add(particle.mesh);
 }
 
 
@@ -315,7 +351,6 @@ function initGame(payload) {
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
     
-    // NOWOŚĆ: Narysuj flagi w punktach odrodzenia
     if (payload.spawnPoints) {
         for(const sp of payload.spawnPoints) {
             const marker = createSpawnMarker();
@@ -323,6 +358,11 @@ function initGame(payload) {
             scene.add(marker);
         }
     }
+    
+    // NOWOŚĆ: Utwórz materiały dymu
+    const smokeTexture = createSmokeTexture();
+    greySmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x888888, depthWrite: false });
+    blackSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x222222, depthWrite: false });
 
     reconcileGameState(clientGameState);
     setupEventListeners();
@@ -433,7 +473,8 @@ function animate() {
     socket.emit("playerInput", keys);
 
     for (const id in clientGameState.players) {
-        const serverTank = clientGameState.players[id]; const clientTank = gameObjects.players[id];
+        const serverTank = clientGameState.players[id];
+        const clientTank = gameObjects.players[id];
         if (clientTank && serverTank) {
             if (serverTank.isDestroyed) {
                 clientTank.visible = false;
@@ -445,6 +486,19 @@ function animate() {
             clientTank.quaternion.slerp(targetQuaternion, 0.25);
             clientTank.turret.rotation.y = serverTank.turretRotation.y;
             clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
+            
+            // NOWOŚĆ: Logika dymienia
+            clientTank.smokeCooldown = (clientTank.smokeCooldown || 0) - delta;
+            if (clientTank.smokeCooldown <= 0) {
+                const hpPercent = (serverTank.health / serverTank.maxHealth) * 100;
+                if (hpPercent < 30) {
+                    emitSmokeParticle(clientTank, blackSmokeMaterial);
+                    clientTank.smokeCooldown = 0.08; // Gęstszy, czarny dym
+                } else if (hpPercent < 45) {
+                    emitSmokeParticle(clientTank, greySmokeMaterial);
+                    clientTank.smokeCooldown = 0.2; // Rzadszy, szary dym
+                }
+            }
         }
     }
     
@@ -476,6 +530,26 @@ function animate() {
         if (p.lifespan <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); gameObjects.particles.splice(i, 1);
         } else { p.velocity.y += gravity * delta; p.position.add(p.velocity.clone().multiplyScalar(delta)); }
     }
+    
+    // NOWOŚĆ: Pętla aktualizująca cząsteczki dymu
+    for (let i = gameObjects.smokeParticles.length - 1; i >= 0; i--) {
+        const p = gameObjects.smokeParticles[i];
+        p.lifespan -= delta;
+        if (p.lifespan <= 0) {
+            scene.remove(p.mesh);
+            p.mesh.geometry.dispose();
+            p.mesh.material.dispose();
+            gameObjects.smokeParticles.splice(i, 1);
+        } else {
+            p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
+            const lifePercent = p.lifespan / p.initialLifespan;
+            p.mesh.material.opacity = lifePercent;
+            const currentScale = p.startSize + (p.endSize - p.startSize) * (1 - lifePercent);
+            p.mesh.scale.set(currentScale, currentScale, currentScale);
+            p.mesh.lookAt(camera.position);
+        }
+    }
+
 
     const wreckGravity = -30;
     for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
