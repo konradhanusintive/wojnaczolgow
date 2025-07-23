@@ -56,6 +56,25 @@ function createGroundTexture() {
   for (let i = 0; i < 8000; i++) { const x = Math.random() * 256; const y = Math.random() * 256; ctx.fillStyle = Math.random() > 0.7 ? "#6B8E23" : "#556B2F"; ctx.fillRect(x, y, 2, 2); }
   const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(32, 32); return texture;
 }
+function createMudTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256; canvas.height = 256;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#5C4033"; // Ciemny brąz
+    ctx.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 4000; i++) {
+        const x = Math.random() * 256;
+        const y = Math.random() * 256;
+        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)"; // Ciemniejsze i jaśniejsze plamy
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(32, 32);
+    return texture;
+}
 function createBrickMaterial() {
     const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#8a3d29"; ctx.fillRect(0, 0, 128, 128); ctx.strokeStyle = "#a15d4a"; ctx.lineWidth = 4;
@@ -355,7 +374,18 @@ function initGame(payload) {
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, 200, 450);
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
+    
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() }));
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+
+    const mudBorderWidth = 30;
+    const mudGeometry = new THREE.PlaneGeometry(MAP_SIZE + mudBorderWidth, MAP_SIZE + mudBorderWidth);
+    const mudMaterial = new THREE.MeshLambertMaterial({ map: createMudTexture() });
+    const mud = new THREE.Mesh(mudGeometry, mudMaterial);
+    mud.rotation.x = -Math.PI / 2;
+    mud.position.y = -0.1; // Błoto jest tuż pod trawą
+    scene.add(mud);
 
     const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
     const waterMaterial = new THREE.MeshStandardMaterial({
@@ -367,7 +397,7 @@ function initGame(payload) {
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    water.position.y = -1.0;
+    water.position.y = -0.4; // Woda jest 0.4m poniżej lądu (y=0)
     scene.add(water);
     
     if (payload.spawnPoints) {
@@ -435,7 +465,7 @@ function reconcileGameState(serverState) {
             const playerData = serverState.players[id]; const tankColor = (id === localPlayerId) ? 0x38a849 : 0xcc3333;
             const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
             tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
-            tank.isSinkingBubbleShown = false; // Dodaj flagę dla dymku
+            tank.isSinkingBubbleShown = false;
             scene.add(tank); 
             gameObjects.players[id] = tank;
         }
@@ -509,7 +539,6 @@ function animate() {
             clientTank.turret.rotation.y = serverTank.turretRotation.y;
             clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
             
-            // Logika dymku "bulbulbul"
             if (serverTank.isSinking && !clientTank.isSinkingBubbleShown) {
                 showCustomQuote(id, "Bul... bul... bul...");
                 clientTank.isSinkingBubbleShown = true;
@@ -606,11 +635,24 @@ function animate() {
 
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
-        const offset = new THREE.Vector3(0, 20, -30);
-        const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
-        camera.position.lerp(cameraTargetPosition, 0.1);
-        camera.lookAt(localPlayerMesh.position.clone().add(new THREE.Vector3(0, 3, 0)));
+        const localPlayerState = clientGameState.players[localPlayerId];
+        
+        if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
+            const dronePosition = new THREE.Vector3(
+                localPlayerMesh.position.x, 
+                localPlayerMesh.position.y + 20, 
+                localPlayerMesh.position.z + 5
+            );
+            camera.position.lerp(dronePosition, 0.05);
+            camera.lookAt(localPlayerMesh.position);
+        } else {
+            const offset = new THREE.Vector3(0, 20, -30);
+            const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
+            camera.position.lerp(cameraTargetPosition, 0.1);
+            camera.lookAt(localPlayerMesh.position.clone().add(new THREE.Vector3(0, 3, 0)));
+        }
     }
+
     updateHUD();
     renderer.render(scene, camera);
 }
