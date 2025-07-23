@@ -350,6 +350,19 @@ function initGame(payload) {
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
+
+    const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
+    const waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x006994,
+        metalness: 0.1,
+        roughness: 0.2,
+        transparent: true,
+        opacity: 0.75, // Zwiększona przezroczystość
+    });
+    const water = new THREE.Mesh(waterGeometry, waterMaterial);
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = -1.0; // Woda jest poniżej poziomu lądu
+    scene.add(water);
     
     if (payload.spawnPoints) {
         for(const sp of payload.spawnPoints) {
@@ -359,7 +372,6 @@ function initGame(payload) {
         }
     }
     
-    // NOWOŚĆ: Utwórz materiały dymu
     const smokeTexture = createSmokeTexture();
     greySmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x888888, depthWrite: false });
     blackSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x222222, depthWrite: false });
@@ -476,27 +488,30 @@ function animate() {
         const serverTank = clientGameState.players[id];
         const clientTank = gameObjects.players[id];
         if (clientTank && serverTank) {
-            if (serverTank.isDestroyed) {
-                clientTank.visible = false;
-                continue;
-            }
-            clientTank.visible = true;
+            clientTank.visible = !serverTank.isDestroyed;
+            
             clientTank.position.lerp(new THREE.Vector3(serverTank.position.x, serverTank.position.y, serverTank.position.z), 0.25);
-            const targetQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.rotation.y, 0));
-            clientTank.quaternion.slerp(targetQuaternion, 0.25);
+            
+            // Logika rotacji i przechyłu
+            const targetChassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.rotation.y, 0));
+            const targetTiltQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverTank.sinkingAngle.x, 0, serverTank.sinkingAngle.z));
+            const finalQuaternion = targetChassisQuaternion.multiply(targetTiltQuaternion);
+            clientTank.quaternion.slerp(finalQuaternion, 0.15);
+
+            // Rotacja wieży i lufy są względne, więc dziedziczą przechył
             clientTank.turret.rotation.y = serverTank.turretRotation.y;
             clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
             
-            // NOWOŚĆ: Logika dymienia
+            // Logika dymienia
             clientTank.smokeCooldown = (clientTank.smokeCooldown || 0) - delta;
-            if (clientTank.smokeCooldown <= 0) {
+            if (clientTank.smokeCooldown <= 0 && !serverTank.isDestroyed && !serverTank.isSinking) {
                 const hpPercent = (serverTank.health / serverTank.maxHealth) * 100;
                 if (hpPercent < 30) {
                     emitSmokeParticle(clientTank, blackSmokeMaterial);
-                    clientTank.smokeCooldown = 0.08; // Gęstszy, czarny dym
+                    clientTank.smokeCooldown = 0.08;
                 } else if (hpPercent < 45) {
                     emitSmokeParticle(clientTank, greySmokeMaterial);
-                    clientTank.smokeCooldown = 0.2; // Rzadszy, szary dym
+                    clientTank.smokeCooldown = 0.2;
                 }
             }
         }
@@ -531,7 +546,6 @@ function animate() {
         } else { p.velocity.y += gravity * delta; p.position.add(p.velocity.clone().multiplyScalar(delta)); }
     }
     
-    // NOWOŚĆ: Pętla aktualizująca cząsteczki dymu
     for (let i = gameObjects.smokeParticles.length - 1; i >= 0; i--) {
         const p = gameObjects.smokeParticles[i];
         p.lifespan -= delta;
@@ -556,12 +570,12 @@ function animate() {
         const wreck = gameObjects.wreckage[i];
         wreck.lifespan -= delta;
         if (wreck.lifespan <= 0) { scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); if(c.material.isMaterial) c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue; }
-        if (wreck.object.position.y > 0 || wreck.velocity.y > 0) {
+        if (wreck.object.position.y > -5 || wreck.velocity.y > 0) { // Pozwól wrakom tonąć
             wreck.velocity.y += wreckGravity * delta; wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
             wreck.object.rotation.x += wreck.angularVelocity.x * delta;
             wreck.object.rotation.y += wreck.angularVelocity.y * delta;
             wreck.object.rotation.z += wreck.angularVelocity.z * delta;
-        } else { wreck.object.position.y = 0; }
+        } else { wreck.object.position.y = -5; }
     }
 
      for (const playerId in gameObjects.players) {
