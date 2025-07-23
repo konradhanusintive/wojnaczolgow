@@ -190,7 +190,6 @@ function createSpawnMarker() {
     return marker;
 }
 
-// NOWOŚĆ: Funkcje związane z dymem
 function createSmokeTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -204,7 +203,7 @@ function createSmokeTexture() {
     return new THREE.CanvasTexture(canvas);
 }
 function emitSmokeParticle(tank, material) {
-    const smokeOffset = new THREE.Vector3(0, 1.5, 4.5); // Offset do tyłu czołgu
+    const smokeOffset = new THREE.Vector3(0, 1.5, 4.5);
     smokeOffset.applyQuaternion(tank.quaternion);
     const smokePos = new THREE.Vector3().copy(tank.position).add(smokeOffset);
 
@@ -293,7 +292,7 @@ function updateScoreboard() {
         .map(p => `<div><span style="color: ${p.id === localPlayerId ? '#38a849' : '#cc3333'}">${p.id === localPlayerId ? 'TY' : p.id.substring(0, 6)}</span><span>${p.score}</span></div>`).join('');
     scoreDisplay.innerHTML = scoresHtml;
 }
-function showTankQuote(playerId) {
+function showCustomQuote(playerId, text) {
     const playerTank = gameObjects.players[playerId];
     if (!playerTank || !camera) return;
 
@@ -305,12 +304,19 @@ function showTankQuote(playerId) {
         document.getElementById('speech-bubbles-container').appendChild(bubble);
     }
     
-    bubble.innerText = TANK_QUOTES[Math.floor(Math.random() * TANK_QUOTES.length)];
+    bubble.innerText = text;
     bubble.style.display = "block";
-    
-    setTimeout(() => {
-        if(bubble) bubble.style.display = "none";
-    }, 4000);
+
+    return bubble;
+}
+function showTankQuote(playerId) {
+    const quote = TANK_QUOTES[Math.floor(Math.random() * TANK_QUOTES.length)];
+    const bubble = showCustomQuote(playerId, quote);
+    if (bubble) {
+        setTimeout(() => {
+            if(bubble) bubble.style.display = "none";
+        }, 4000);
+    }
 }
 
 function displayKillNotification(attackerId, victimId) {
@@ -357,11 +363,11 @@ function initGame(payload) {
         metalness: 0.1,
         roughness: 0.2,
         transparent: true,
-        opacity: 0.75, // Zwiększona przezroczystość
+        opacity: 0.75,
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    water.position.y = -1.0; // Woda jest poniżej poziomu lądu
+    water.position.y = -1.0;
     scene.add(water);
     
     if (payload.spawnPoints) {
@@ -380,7 +386,7 @@ function initGame(payload) {
     setupEventListeners();
     animate();
     setInterval(() => {
-        if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed) {
+        if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed && !clientGameState.players[localPlayerId].isSinking) {
              if (Math.random() > 0.6) showTankQuote(localPlayerId);
         }
     }, 15000 + Math.random() * 5000);
@@ -428,7 +434,10 @@ function reconcileGameState(serverState) {
         if (!gameObjects.players[id]) {
             const playerData = serverState.players[id]; const tankColor = (id === localPlayerId) ? 0x38a849 : 0xcc3333;
             const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
-            tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z); scene.add(tank); gameObjects.players[id] = tank;
+            tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
+            tank.isSinkingBubbleShown = false; // Dodaj flagę dla dymku
+            scene.add(tank); 
+            gameObjects.players[id] = tank;
         }
     }
     const serverBuildingIds = Object.keys(serverState.buildings || {});
@@ -492,17 +501,24 @@ function animate() {
             
             clientTank.position.lerp(new THREE.Vector3(serverTank.position.x, serverTank.position.y, serverTank.position.z), 0.25);
             
-            // Logika rotacji i przechyłu
             const targetChassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.rotation.y, 0));
             const targetTiltQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverTank.sinkingAngle.x, 0, serverTank.sinkingAngle.z));
             const finalQuaternion = targetChassisQuaternion.multiply(targetTiltQuaternion);
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
 
-            // Rotacja wieży i lufy są względne, więc dziedziczą przechył
             clientTank.turret.rotation.y = serverTank.turretRotation.y;
             clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
             
-            // Logika dymienia
+            // Logika dymku "bulbulbul"
+            if (serverTank.isSinking && !clientTank.isSinkingBubbleShown) {
+                showCustomQuote(id, "Bul... bul... bul...");
+                clientTank.isSinkingBubbleShown = true;
+            } else if (!serverTank.isSinking && clientTank.isSinkingBubbleShown) {
+                const bubble = document.getElementById(`bubble-${id}`);
+                if (bubble) bubble.style.display = 'none';
+                clientTank.isSinkingBubbleShown = false;
+            }
+
             clientTank.smokeCooldown = (clientTank.smokeCooldown || 0) - delta;
             if (clientTank.smokeCooldown <= 0 && !serverTank.isDestroyed && !serverTank.isSinking) {
                 const hpPercent = (serverTank.health / serverTank.maxHealth) * 100;
@@ -564,13 +580,12 @@ function animate() {
         }
     }
 
-
     const wreckGravity = -30;
     for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
         const wreck = gameObjects.wreckage[i];
         wreck.lifespan -= delta;
         if (wreck.lifespan <= 0) { scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); if(c.material.isMaterial) c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue; }
-        if (wreck.object.position.y > -5 || wreck.velocity.y > 0) { // Pozwól wrakom tonąć
+        if (wreck.object.position.y > -5 || wreck.velocity.y > 0) {
             wreck.velocity.y += wreckGravity * delta; wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
             wreck.object.rotation.x += wreck.angularVelocity.x * delta;
             wreck.object.rotation.y += wreck.angularVelocity.y * delta;
@@ -651,6 +666,7 @@ socket.on("playerConnected", (playerData) => {
     const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
     tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
     tank.rotation.y = playerData.rotation.y;
+    tank.isSinkingBubbleShown = false;
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
 });

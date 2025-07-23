@@ -186,7 +186,7 @@ function gameLoop() {
         
         if (player.isSinking) {
             player.sinkingTimer -= delta;
-            player.position.y -= 2.5 * delta; // Zwiększona prędkość tonięcia
+            player.position.y -= 3.5 * delta; // Przyspieszone tonięcie
             if (player.sinkingTimer <= 0) {
                 player.isDestroyed = true;
                 player.respawnTimer = 3.0; 
@@ -242,15 +242,24 @@ function gameLoop() {
         if ((player.keys.KeyF || player.keys.Semicolon) && player.mantletRotation.x > -0.5) player.mantletRotation.x -= rotateSpeed * 0.5;
         if ((player.keys.KeyV || player.keys.Quote) && player.mantletRotation.x < 0.2) player.mantletRotation.x += rotateSpeed * 0.5;
 
-        // Sprawdzenie, czy czołg jest w całości poza mapą (w wodzie)
-        if (Math.abs(player.position.x) > MAP_SIZE / 2 + PLAYER_COLLISION_RADIUS || Math.abs(player.position.z) > MAP_SIZE / 2 + PLAYER_COLLISION_RADIUS) {
+        // Logika tonięcia: środek ciężkości (pozycja czołgu) musi być poza lądem
+        if (Math.abs(player.position.x) > MAP_SIZE / 2 || Math.abs(player.position.z) > MAP_SIZE / 2) {
             if (!player.isSinking) {
                  player.isSinking = true;
-                 player.sinkingTimer = 1.8; // Skrócony czas tonięcia
-                 const tiltMagnitude = Math.PI / 7; // Kąt przechyłu (ok. 25 stopni)
-                 const exitAngle = Math.atan2(player.position.x, player.position.z); // Kąt od środka mapy
-                 player.sinkingAngle.x = -Math.cos(exitAngle) * tiltMagnitude;
-                 player.sinkingAngle.z = Math.sin(exitAngle) * tiltMagnitude;
+                 player.sinkingTimer = 2.0; // Czas tonięcia
+                 const tiltMagnitude = Math.PI / 6; // Kąt przechyłu (ok. 30 stopni)
+                 // Oblicz wektor od czołgu do krawędzi, aby określić kierunek przechyłu
+                 const edgeX = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, player.position.x));
+                 const edgeZ = Math.max(-MAP_SIZE/2, Math.min(MAP_SIZE/2, player.position.z));
+                 const vecToEdgeX = player.position.x - edgeX;
+                 const vecToEdgeZ = player.position.z - edgeZ;
+                 // Normalizuj wektor
+                 const len = Math.sqrt(vecToEdgeX*vecToEdgeX + vecToEdgeZ*vecToEdgeZ) || 1;
+                 const normX = vecToEdgeX / len;
+                 const normZ = vecToEdgeZ / len;
+                 // Ustaw kąt przechyłu: przechył wzdłuż osi Z jest kontrolowany przez pozycję X i vice versa
+                 player.sinkingAngle.x = -normZ * tiltMagnitude;
+                 player.sinkingAngle.z = normX * tiltMagnitude;
             }
         }
 
@@ -312,7 +321,7 @@ function gameLoop() {
                 destroyed = true; break;
             }
         }
-        if (p.lifespan <= 0 || destroyed || p.position.y < -5) { // Pozwól pociskom lecieć pod wodę
+        if (p.lifespan <= 0 || destroyed || p.position.y < -5) {
             delete projGroup.list[id]; 
             io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: destroyed }); 
         }
@@ -422,7 +431,6 @@ function createProceduralCity() {
                     z: cityOrigin.z + j * CITY_CELL_SIZE + CITY_CELL_SIZE / 2,
                 };
                 
-                // Uniemożliwia budowanie budynków poza główną mapą
                 if (Math.abs(position.x) > MAP_SIZE / 2 || Math.abs(position.z) > MAP_SIZE / 2) {
                     continue;
                 }
