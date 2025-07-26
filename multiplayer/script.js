@@ -562,18 +562,24 @@ function drawMinimap() {
     const radius = canvas.width / 2;
     const scale = radius / MINIMAP_VIEW_RADIUS;
     
-    // --- Transformacje ---
-    const playerAngle = -localPlayer.rotation.y + Math.PI; // POPRAWKA: Obrót o 180 stopni
-    const cosAngle = Math.cos(playerAngle);
-    const sinAngle = Math.sin(playerAngle);
-    
+    // --- POPRAWIONA LOGIKA TRANSFORMACJI ---
+    const playerRot = localPlayer.rotation.y;
+    const sinR = Math.sin(playerRot);
+    const cosR = Math.cos(playerRot);
+
     const transformPoint = (x, z) => {
         const dx = x - localPlayer.position.x;
         const dz = z - localPlayer.position.z;
+
         if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) return null;
-        const rotatedX = dx * cosAngle - dz * sinAngle;
-        const rotatedZ = dx * sinAngle + dz * cosAngle;
-        return { x: centerX + rotatedX * scale, y: centerY - rotatedZ * scale };
+
+        // Transformacja wektorowa: rzutowanie wektora (obiekt -> gracz) na lokalne osie gracza.
+        // Oś "prawa" gracza to (cos, -sin). Oś "do przodu" to (sin, cos) - zgodnie z logiką ruchu na serwerze.
+        const localX = dx * cosR - dz * sinR;  
+        const localZ = dx * sinR + dz * cosR;
+
+        // Mapowanie na współrzędne canvasa. -localZ, ponieważ +Z na mapie to "w górę" (-Y na canvasie).
+        return { x: centerX + localX * scale, y: centerY - localZ * scale };
     };
     
     // --- Rysowanie tła i siatki ---
@@ -588,7 +594,7 @@ function drawMinimap() {
     
     ctx.strokeStyle = 'rgba(50, 255, 50, 0.2)';
     ctx.lineWidth = 1;
-    [0.33, 0.66].forEach(r => {
+    [0.25, 0.5, 0.75].forEach(r => {
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius * r, 0, Math.PI * 2);
         ctx.stroke();
@@ -601,7 +607,7 @@ function drawMinimap() {
     // --- Rysowanie obiektów ---
     const currentTime = Date.now();
 
-    // Budynki (jako pojedyncze, obrócone prostokąty)
+    // Budynki
     ctx.fillStyle = 'rgba(50, 200, 50, 0.25)';
     for (const id in gameObjects.buildings) {
         const buildingData = gameObjects.buildings[id]?.data;
@@ -621,18 +627,20 @@ function drawMinimap() {
 
         const transformedCorners = corners.map(c => transformPoint(c.x, c.z));
 
-        if (transformedCorners.some(c => c === null)) continue;
+        if (transformedCorners.some(c => c === null) && transformedCorners.every(c => c === null)) continue;
         
-        ctx.beginPath();
-        ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y);
-        for(let i = 1; i < transformedCorners.length; i++) {
-            ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y);
+        if (transformedCorners.every(c => c !== null)) {
+            ctx.beginPath();
+            ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y);
+            for(let i = 1; i < transformedCorners.length; i++) {
+                ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
         }
-        ctx.closePath();
-        ctx.fill();
     }
     
-    // Skrzynki (migające)
+    // Skrzynki
     const crateBlink = Math.sin(currentTime * 0.005) * 0.4 + 0.6;
     ctx.fillStyle = `rgba(255, 223, 0, ${crateBlink})`;
     ctx.strokeStyle = `rgba(255, 223, 0, ${crateBlink + 0.2})`;
@@ -648,7 +656,7 @@ function drawMinimap() {
         }
     }
 
-    // Wrogowie (czerwone "blipy")
+    // Wrogowie
     ctx.fillStyle = '#ff1a1a';
     for (const id in clientGameState.players) {
         if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
@@ -672,7 +680,7 @@ function drawMinimap() {
     ctx.closePath();
     ctx.fillStyle = sweepGradient;
     ctx.fill();
-    ctx.restore(); // Zdejmuje clipping path
+    ctx.restore(); 
 
     // --- Ikona gracza ---
     ctx.save();
@@ -703,7 +711,7 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2); // Obrót linii skanującej
+    minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
 
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
     if(keys['Space'] || keys['Enter']) {
