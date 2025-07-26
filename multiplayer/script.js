@@ -562,24 +562,23 @@ function drawMinimap() {
     const radius = canvas.width / 2;
     const scale = radius / MINIMAP_VIEW_RADIUS;
     
-    // --- POPRAWIONA LOGIKA TRANSFORMACJI ---
+    // --- OSTATECZNA POPRAWKA LOGIKI TRANSFORMACJI ---
     const playerRot = localPlayer.rotation.y;
-    const sinR = Math.sin(playerRot);
     const cosR = Math.cos(playerRot);
-
+    const sinR = Math.sin(playerRot);
+    
     const transformPoint = (x, z) => {
         const dx = x - localPlayer.position.x;
         const dz = z - localPlayer.position.z;
 
         if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) return null;
 
-        // Transformacja wektorowa: rzutowanie wektora (obiekt -> gracz) na lokalne osie gracza.
-        // Oś "prawa" gracza to (cos, -sin). Oś "do przodu" to (sin, cos) - zgodnie z logiką ruchu na serwerze.
-        const localX = dx * cosR - dz * sinR;  
-        const localZ = dx * sinR + dz * cosR;
-
-        // Mapowanie na współrzędne canvasa. -localZ, ponieważ +Z na mapie to "w górę" (-Y na canvasie).
-        return { x: centerX + localX * scale, y: centerY - localZ * scale };
+        // Obracamy świat o -playerRot, aby gracz był zawsze skierowany "w górę"
+        const rotatedX = dx * cosR + dz * sinR;
+        const rotatedZ = -dx * sinR + dz * cosR;
+        
+        // Mapowanie na koordynaty canvasa. rotatedX to oś w prawo, rotatedZ to oś do przodu.
+        return { x: centerX + rotatedX * scale, y: centerY - rotatedZ * scale };
     };
     
     // --- Rysowanie tła i siatki ---
@@ -626,8 +625,6 @@ function drawMinimap() {
         ];
 
         const transformedCorners = corners.map(c => transformPoint(c.x, c.z));
-
-        if (transformedCorners.some(c => c === null) && transformedCorners.every(c => c === null)) continue;
         
         if (transformedCorners.every(c => c !== null)) {
             ctx.beginPath();
