@@ -14,10 +14,10 @@ let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 
 // Zmienne do celowania z opóźnieniem
-let targetTurretRotationY = 0;
-let targetMantletRotationX = 0;
-let clientTurretRotationY = 0;
-let clientMantletRotationX = 0;
+let targetTurretRotationY = 0; // Cel, do którego dąży wieża
+let targetMantletRotationX = 0; // Cel, do którego dąży lufa
+let clientTurretRotationY = 0; // Aktualna, interpolowana rotacja wieży
+let clientMantletRotationX = 0; // Aktualna, interpolowana rotacja lufy
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -797,8 +797,17 @@ function animate() {
     if(keys['mouse0']) {
         if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') { handleFireInput(); }
     }
+    
+    // **NOWA, POPRAWNA LOGIKA INTERPOLACJI KĄTA**
+    let diff = targetTurretRotationY - clientTurretRotationY;
+    while (diff < -Math.PI) diff += 2 * Math.PI;
+    while (diff > Math.PI) diff -= 2 * Math.PI;
 
-    // Wysyłaj na serwer aktualną, interpolowaną pozycję lufy
+    const lerpFactor = delta * 5.0; // Szybkość obrotu wieży
+    clientTurretRotationY += diff * lerpFactor;
+    clientMantletRotationX = THREE.MathUtils.lerp(clientMantletRotationX, targetMantletRotationX, lerpFactor);
+
+
     socket.emit("playerInput", {
         keys,
         turretRotationY: clientTurretRotationY,
@@ -819,15 +828,9 @@ function animate() {
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
 
             if (id === localPlayerId) {
-                // Płynne podążanie lufy za celem (interpolacja)
-                const lerpFactor = delta * 5.0; 
-                clientTurretRotationY = THREE.MathUtils.lerp(clientTurretRotationY, targetTurretRotationY, lerpFactor);
-                clientMantletRotationX = THREE.MathUtils.lerp(clientMantletRotationX, targetMantletRotationX, lerpFactor);
-
                 clientTank.turret.rotation.y = clientTurretRotationY;
                 clientTank.mantlet.rotation.x = clientMantletRotationX;
             } else {
-                // Dla innych graczy, interpoluj do wartości z serwera
                 const targetTurretQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.turretRotation.y, 0));
                 clientTank.turret.quaternion.slerp(targetTurretQuaternion, 0.15);
                 clientTank.mantlet.rotation.x = THREE.MathUtils.lerp(clientTank.mantlet.rotation.x, serverTank.mantletRotation.x, 0.15);
