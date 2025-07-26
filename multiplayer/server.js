@@ -405,7 +405,7 @@ function checkPlayerBuildingCollision(player) {
             const brickAABB = {
                 minX: brickWorldPos.x - BRICK_SIZE.x / 2, maxX: brickWorldPos.x + BRICK_SIZE.x / 2,
                 minY: brickWorldPos.y - BRICK_SIZE.y / 2, maxY: brickWorldPos.y + BRICK_SIZE.y / 2,
-                minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z + BRICK_SIZE.z / 2,
+                minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z - BRICK_SIZE.z / 2,
             };
 
             if (player.position.x + playerRadius > brickAABB.minX && player.position.x - playerRadius < brickAABB.maxX &&
