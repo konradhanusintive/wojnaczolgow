@@ -12,6 +12,19 @@ let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
+let sniperOverlayEl;
+
+// Zmienne dla trybu snajperskiego i celowania
+let isSniperMode = false;
+const MOUSE_SENSITIVITY = 0.002;
+const MIN_SNIPER_FOV = 10;
+const MAX_SNIPER_FOV = 40;
+const DEFAULT_FOV = 75;
+let currentSniperFov = MAX_SNIPER_FOV;
+let recoilAmount = 0;
+const RECOIL_KICK = 0.8;
+const RECOIL_RECOVERY_SPEED = 8;
+
 
 const keys = {};
 let canFire = true;
@@ -399,13 +412,15 @@ function initGame(payload) {
     localPlayerId = payload.playerId; clientGameState = payload.initialState; isGameStarted = true;
     renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, 200, 450);
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
+    camera = new THREE.PerspectiveCamera(DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
     
     minimapCanvas = document.getElementById('minimap');
-    minimapCanvas.width = 220; // Dopasowanie do CSS
-    minimapCanvas.height = 220; // Dopasowanie do CSS
+    minimapCanvas.width = 220;
+    minimapCanvas.height = 220;
     minimapCtx = minimapCanvas.getContext('2d');
+    
+    sniperOverlayEl = document.getElementById('sniper-overlay');
     
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() }));
     ground.rotation.x = -Math.PI / 2;
@@ -416,7 +431,7 @@ function initGame(payload) {
     const mudMaterial = new THREE.MeshLambertMaterial({ map: createMudTexture() });
     const mud = new THREE.Mesh(mudGeometry, mudMaterial);
     mud.rotation.x = -Math.PI / 2;
-    mud.position.y = -0.1; // Błoto jest tuż pod trawą
+    mud.position.y = -0.1; 
     scene.add(mud);
 
     const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
@@ -429,7 +444,7 @@ function initGame(payload) {
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    water.position.y = -0.4; // Woda jest 0.4m poniżej lądu (y=0)
+    water.position.y = -0.4;
     scene.add(water);
     
     if (payload.spawnPoints) {
@@ -456,6 +471,10 @@ function initGame(payload) {
 function handleFireInput() {
     if (!canFire || !localPlayerId || clientGameState.players[localPlayerId].isDestroyed) return;
 
+    if (isSniperMode) {
+        recoilAmount = RECOIL_KICK;
+    }
+
     const playerState = clientGameState.players[localPlayerId];
     let cooldownTime = 0.5;
     if(playerState.activePowerUp === 'machinegun') {
@@ -469,13 +488,7 @@ function handleFireInput() {
     fireCooldown = cooldownTime;
 }
 function setupEventListeners() {
-    document.addEventListener("keydown", (e) => {
-        keys[e.code] = true;
-        if (e.code === 'Space' || e.code === 'Enter') {
-            e.preventDefault();
-            handleFireInput();
-        }
-    });
+    document.addEventListener("keydown", (e) => { keys[e.code] = true; });
     document.addEventListener("keyup", (e) => {
         keys[e.code] = false; if (!isGameStarted || !localPlayerId) return;
         if (e.code === 'KeyR') socket.emit('playerAction', { type: 'reload' });
@@ -484,12 +497,70 @@ function setupEventListeners() {
     });
     const menuEl = document.getElementById("menu"), mapEl = document.getElementById("map-overlay"), scoreEl = document.getElementById("score-overlay");
     document.addEventListener("keydown", (e) => {
-        if (!isGameStarted) return; if (e.code === "Escape") menuEl.style.display = menuEl.style.display === "flex" ? "none" : "flex";
+        if (!isGameStarted) return; if (e.code === "Escape") {
+            menuEl.style.display = menuEl.style.display === "flex" ? "none" : "flex";
+            if (menuEl.style.display === 'flex') {
+                document.exitPointerLock();
+                document.body.classList.remove('in-game');
+            }
+        }
         if (e.code === "KeyM") mapEl.style.display = mapEl.style.display === "flex" ? "none" : "flex";
         if (e.code === "Tab") { e.preventDefault(); scoreEl.style.display = "flex"; updateScoreboard(); }
     });
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
+
+    // --- Nowe eventy dla myszy ---
+    renderer.domElement.addEventListener('click', () => {
+        renderer.domElement.requestPointerLock();
+        document.body.classList.add('in-game');
+    });
+    document.addEventListener('mousemove', (e) => {
+        if(document.pointerLockElement === renderer.domElement && localPlayerId && gameObjects.players[localPlayerId]) {
+            const playerState = clientGameState.players[localPlayerId];
+            const playerObject = gameObjects.players[localPlayerId];
+            
+            playerState.turretRotation.y -= e.movementX * MOUSE_SENSITIVITY;
+            playerState.mantletRotation.x += e.movementY * MOUSE_SENSITIVITY; // POPRAWKA: Odwrócenie osi Y
+            playerState.mantletRotation.x = Math.max(-0.5, Math.min(0.2, playerState.mantletRotation.x));
+            
+            // POPRAWKA PŁYNNOŚCI: Natychmiastowa aktualizacja lokalnego obiektu 3D
+            playerObject.turret.rotation.y = playerState.turretRotation.y;
+            playerObject.mantlet.rotation.x = playerState.mantletRotation.x;
+            
+            socket.emit('playerAimUpdate', { turretY: playerState.turretRotation.y, mantletX: playerState.mantletRotation.x });
+        }
+    });
+    document.addEventListener('mousedown', (e) => {
+        if(isGameStarted && document.pointerLockElement === renderer.domElement) {
+            if (e.button === 0) { handleFireInput(); } // Lewy przycisk
+            if (e.button === 2) { // Prawy przycisk
+                isSniperMode = true;
+                sniperOverlayEl.style.display = 'block';
+                document.body.classList.remove('in-game');
+            }
+        }
+    });
+    document.addEventListener('mouseup', (e) => {
+        if (e.button === 2) { // Prawy przycisk
+            isSniperMode = false;
+            currentSniperFov = MAX_SNIPER_FOV;
+            camera.fov = DEFAULT_FOV;
+            camera.updateProjectionMatrix();
+            sniperOverlayEl.style.display = 'none';
+            document.body.classList.add('in-game');
+        }
+    });
+    document.addEventListener('wheel', (e) => {
+        if (isSniperMode) {
+            // POPRAWKA: Odwrócenie kierunku scrollowania
+            currentSniperFov += e.deltaY * 0.05;
+            currentSniperFov = Math.max(MIN_SNIPER_FOV, Math.min(MAX_SNIPER_FOV, currentSniperFov));
+        }
+    });
+    document.addEventListener('contextmenu', e => e.preventDefault());
 }
+
+// ... reszta funkcji (reconcile, createObjectMesh) bez zmian ...
 function reconcileGameState(serverState) {
     const serverPlayerIds = Object.keys(serverState.players || {});
     for (const id of serverPlayerIds) {
@@ -562,7 +633,6 @@ function drawMinimap() {
     const radius = canvas.width / 2;
     const scale = radius / MINIMAP_VIEW_RADIUS;
     
-    // --- OSTATECZNA POPRAWKA LOGIKI TRANSFORMACJI ---
     const playerRot = localPlayer.rotation.y;
     const cosR = Math.cos(playerRot);
     const sinR = Math.sin(playerRot);
@@ -572,12 +642,10 @@ function drawMinimap() {
         const dz = z - localPlayer.position.z;
 
         if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) return null;
-
-        // Obracamy świat o -playerRot, aby gracz był zawsze skierowany "w górę"
+        
         const rotatedX = dx * cosR + dz * sinR;
         const rotatedZ = -dx * sinR + dz * cosR;
         
-        // Mapowanie na koordynaty canvasa. rotatedX to oś w prawo, rotatedZ to oś do przodu.
         return { x: centerX + rotatedX * scale, y: centerY - rotatedZ * scale };
     };
     
@@ -709,12 +777,9 @@ function animate() {
     const delta = clock.getDelta();
 
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
-
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
-    if(keys['Space'] || keys['Enter']) {
-        if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') { handleFireInput(); }
-    }
-
+    
+    // Aktualizacja stanu z klawiatury jest wysyłana do serwera
     socket.emit("playerInput", keys);
 
     for (const id in clientGameState.players) {
@@ -729,9 +794,12 @@ function animate() {
             const targetTiltQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverTank.sinkingAngle.x, 0, serverTank.sinkingAngle.z));
             const finalQuaternion = targetChassisQuaternion.multiply(targetTiltQuaternion);
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
-
-            clientTank.turret.rotation.y = serverTank.turretRotation.y;
-            clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
+            
+            // Tylko inni gracze mają wieżyczkę aktualizowaną z serwera, lokalny gracz ma natychmiastową
+            if (id !== localPlayerId) {
+                clientTank.turret.rotation.y = serverTank.turretRotation.y;
+                clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
+            }
             
             if (serverTank.isSinking && !clientTank.isSinkingBubbleShown) {
                 showCustomQuote(id, "Bul... bul... bul...");
@@ -827,19 +895,39 @@ function animate() {
         }
     }
 
+    // --- NOWA LOGIKA KAMERY ---
+    if (recoilAmount > 0) {
+        recoilAmount = Math.max(0, recoilAmount - RECOIL_RECOVERY_SPEED * delta);
+    }
+
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
         const localPlayerState = clientGameState.players[localPlayerId];
         
         if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
-            const dronePosition = new THREE.Vector3(
-                localPlayerMesh.position.x, 
-                localPlayerMesh.position.y + 20, 
-                localPlayerMesh.position.z + 5
-            );
+            const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
             camera.position.lerp(dronePosition, 0.05);
             camera.lookAt(localPlayerMesh.position);
+        } else if (isSniperMode) {
+            camera.fov = THREE.MathUtils.lerp(camera.fov, currentSniperFov, 0.1);
+            camera.updateProjectionMatrix();
+
+            const barrelWorldPos = new THREE.Vector3();
+            localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
+            
+            const recoilOffset = new THREE.Vector3(0, 0, -recoilAmount);
+            recoilOffset.applyQuaternion(camera.quaternion);
+            
+            camera.position.copy(barrelWorldPos).add(recoilOffset);
+            
+            const lookAtDir = new THREE.Vector3(0,0,1);
+            lookAtDir.applyQuaternion(localPlayerMesh.barrel.getWorldQuaternion(new THREE.Quaternion()));
+            camera.lookAt(barrelWorldPos.clone().add(lookAtDir.multiplyScalar(100)));
+
         } else {
+            camera.fov = THREE.MathUtils.lerp(camera.fov, DEFAULT_FOV, 0.1);
+            camera.updateProjectionMatrix();
+
             const offset = new THREE.Vector3(0, 20, -30);
             const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
             camera.position.lerp(cameraTargetPosition, 0.1);
@@ -855,7 +943,14 @@ function animate() {
 // --- OBSŁUGA ZDARZEŃ Z SERWERA ---
 socket.on("connect", () => console.log("Połączono z serwerem!", socket.id));
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
-socket.on("gameStateUpdate", (serverState) => { clientGameState = serverState; });
+socket.on("gameStateUpdate", (serverState) => {
+    // Zachowaj lokalną, płynną pozycję wieżyczki dla gracza
+    if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
+        serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;
+        serverState.players[localPlayerId].mantletRotation = clientGameState.players[localPlayerId].mantletRotation;
+    }
+    clientGameState = serverState;
+});
 socket.on('objectCreated', (payload) => { createObjectMesh(payload); });
 
 socket.on('objectDestroyed', (payload) => {

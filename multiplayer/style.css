@@ -4,7 +4,13 @@ body {
   background: #000;
   color: white;
   font-family: sans-serif;
+  /* Domyślny kursor, ukrywany przez Pointer Lock API */
 }
+body.in-game {
+  /* Niestandardowy kursor SVG jako celownik */
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>') 12 12, auto;
+}
+
 canvas {
   display: block;
 }
@@ -135,6 +141,22 @@ canvas {
 .select-button:disabled {
   background: #555;
   cursor: not-allowed;
+}
+
+#sniper-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 20;
+    /* Jaśniejsze tło (z 0.85 na 0.6) */
+    box-shadow: inset 0 0 0 100vmax rgba(0,0,0,0.6);
+    background-image: 
+        /* Celownik */
+        linear-gradient(to right, transparent 49.9%, #ff3333 49.9%, #ff3333 50.1%, transparent 50.1%),
+        linear-gradient(to bottom, transparent 49.9%, #ff3333 49.9%, #ff3333 50.1%, transparent 50.1%);
 }
 
 /* Zmodyfikowany pojedynczy HUD */

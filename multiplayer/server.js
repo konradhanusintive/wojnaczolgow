@@ -226,8 +226,10 @@ function gameLoop() {
             moveVector.x -= Math.sin(player.rotation.y) * moveSpeed;
             moveVector.z -= Math.cos(player.rotation.y) * moveSpeed;
         }
+        // Ruch podwozia jest teraz niezależny od myszy
         if (player.keys.KeyA || player.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
         if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
+
 
         if (moveVector.x !== 0 || moveVector.z !== 0) {
             const newPosX = oldPos.x + moveVector.x;
@@ -238,10 +240,8 @@ function gameLoop() {
             if (checkPlayerBuildingCollision(player)) { player.position.z = oldPos.z; }
         }
         
-        if (player.keys.KeyQ || player.keys.BracketLeft) player.turretRotation.y += rotateSpeed;
-        if (player.keys.KeyE || player.keys.BracketRight) player.turretRotation.y -= rotateSpeed;
-        if ((player.keys.KeyF || player.keys.Semicolon) && player.mantletRotation.x > -0.5) player.mantletRotation.x -= rotateSpeed * 0.5;
-        if ((player.keys.KeyV || player.keys.Quote) && player.mantletRotation.x < 0.2) player.mantletRotation.x += rotateSpeed * 0.5;
+        // Wieża i lufa są teraz kontrolowane przez klienta (myszką)
+        // Usunięto sterowanie Q, E, F, V
 
         // Logika tonięcia: czołg tonie dopiero po zjechaniu z błota
         const safeZone = MAP_SIZE / 2 + MUD_BORDER_WIDTH;
@@ -500,6 +500,15 @@ io.on("connection", (socket) => {
     console.log(`Gracz ${socket.id} wybrał czołg ${tankType}.`);
   });
   socket.on("playerInput", (keys) => { if (gameState.players[socket.id]) { gameState.players[socket.id].keys = keys; } });
+  
+  socket.on("playerAimUpdate", (aimData) => {
+      const player = gameState.players[socket.id];
+      if(player) {
+          player.turretRotation.y = aimData.turretY;
+          player.mantletRotation.x = aimData.mantletX;
+      }
+  });
+
   socket.on("playerAction", (action) => { handlePlayerAction(socket, action); });
   socket.on("disconnect", () => {
     console.log(`Gracz rozłączony: ${socket.id}`);
