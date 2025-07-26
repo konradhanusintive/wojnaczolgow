@@ -14,10 +14,10 @@ let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 
 // Zmienne do celowania z opóźnieniem
-let targetTurretRotationY = 0; // Cel, do którego dąży wieża
-let targetMantletRotationX = 0; // Cel, do którego dąży lufa
-let clientTurretRotationY = 0; // Aktualna, interpolowana rotacja wieży
-let clientMantletRotationX = 0; // Aktualna, interpolowana rotacja lufy
+let targetTurretWorldAngleY = 0; // Kąt w przestrzeni świata, do którego dąży wieża
+let currentTurretWorldAngleY = 0; // Aktualny, interpolowany kąt wieży w przestrzeni świata
+let targetMantletRotationX = 0;
+let clientMantletRotationX = 0;
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -410,10 +410,12 @@ function initGame(payload) {
 
     const localPlayerState = clientGameState.players[localPlayerId];
     if (localPlayerState) {
-        targetTurretRotationY = localPlayerState.turretRotation.y;
-        targetMantletRotationX = localPlayerState.mantletRotation.x;
-        clientTurretRotationY = targetTurretRotationY;
-        clientMantletRotationX = targetMantletRotationX;
+        // Ustaw początkowy kąt świata na podstawie stanu serwera
+        currentTurretWorldAngleY = localPlayerState.rotation.y + localPlayerState.turretRotation.y;
+        targetTurretWorldAngleY = currentTurretWorldAngleY;
+
+        clientMantletRotationX = localPlayerState.mantletRotation.x;
+        targetMantletRotationX = clientMantletRotationX;
     }
 
     renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
@@ -558,10 +560,8 @@ function updateAim() {
         
         const direction = intersectionPoint.clone().sub(turretWorldPosition);
         
-        const hullAngleY = playerTank.rotation.y;
-        const worldAngleY = Math.atan2(direction.x, direction.z);
-        
-        targetTurretRotationY = worldAngleY - hullAngleY;
+        // Oblicz docelowy kąt wieży w przestrzeni świata
+        targetTurretWorldAngleY = Math.atan2(direction.x, direction.z);
 
         const horizontalDistance = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
         targetMantletRotationX = -Math.atan2(direction.y, horizontalDistance);
@@ -799,20 +799,14 @@ function animate() {
     }
     
     // **NOWA, POPRAWNA LOGIKA INTERPOLACJI KĄTA**
-    let diff = targetTurretRotationY - clientTurretRotationY;
+    let diff = targetTurretWorldAngleY - currentTurretWorldAngleY;
     while (diff < -Math.PI) diff += 2 * Math.PI;
     while (diff > Math.PI) diff -= 2 * Math.PI;
 
-    const lerpFactor = delta * 5.0; // Szybkość obrotu wieży
-    clientTurretRotationY += diff * lerpFactor;
+    const lerpFactor = delta * 5.0; 
+    currentTurretWorldAngleY += diff * lerpFactor;
     clientMantletRotationX = THREE.MathUtils.lerp(clientMantletRotationX, targetMantletRotationX, lerpFactor);
 
-
-    socket.emit("playerInput", {
-        keys,
-        turretRotationY: clientTurretRotationY,
-        mantletRotationX: clientMantletRotationX
-    });
 
     for (const id in clientGameState.players) {
         const serverTank = clientGameState.players[id];
@@ -828,8 +822,18 @@ function animate() {
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
 
             if (id === localPlayerId) {
-                clientTank.turret.rotation.y = clientTurretRotationY;
+                const clientTurretLocalAngleY = currentTurretWorldAngleY - serverTank.rotation.y;
+                clientTank.turret.rotation.y = clientTurretLocalAngleY;
+                clientTank.mantlet.rotation.y = 0; // Reset
                 clientTank.mantlet.rotation.x = clientMantletRotationX;
+
+                // Wysyłaj na serwer lokalny kąt wieży
+                socket.emit("playerInput", {
+                    keys,
+                    turretRotationY: clientTurretLocalAngleY,
+                    mantletRotationX: clientMantletRotationX
+                });
+
             } else {
                 const targetTurretQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.turretRotation.y, 0));
                 clientTank.turret.quaternion.slerp(targetTurretQuaternion, 0.15);
@@ -943,8 +947,10 @@ function animate() {
             camera.position.lerp(dronePosition, 0.05);
             camera.lookAt(localPlayerMesh.position);
         } else {
+            // **NOWA LOGIKA KAMERY**
+            const cameraRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, currentTurretWorldAngleY, 0));
             const offset = new THREE.Vector3(0, 20, -30);
-            const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
+            const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(cameraRotation));
             camera.position.lerp(cameraTargetPosition, 0.1);
             camera.lookAt(localPlayerMesh.position.clone().add(new THREE.Vector3(0, 3, 0)));
         }
