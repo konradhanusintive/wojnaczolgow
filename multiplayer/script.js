@@ -12,13 +12,16 @@ let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
+
+// Zmienne do celowania z opóźnieniem
+let targetTurretRotationY = 0;
+let targetMantletRotationX = 0;
 let clientTurretRotationY = 0;
 let clientMantletRotationX = 0;
 
-// Zmienne do celowania
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-const aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // Płaszczyzna celowania na poziomie gruntu (y=0)
+const aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 const keys = {};
 let canFire = true;
@@ -69,12 +72,12 @@ function createMudTexture() {
     const canvas = document.createElement("canvas");
     canvas.width = 256; canvas.height = 256;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#5C4033"; // Ciemny brąz
+    ctx.fillStyle = "#5C4033";
     ctx.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 4000; i++) {
         const x = Math.random() * 256;
         const y = Math.random() * 256;
-        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)"; // Ciemniejsze i jaśniejsze plamy
+        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)";
         ctx.fillStyle = color;
         ctx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
     }
@@ -407,8 +410,10 @@ function initGame(payload) {
 
     const localPlayerState = clientGameState.players[localPlayerId];
     if (localPlayerState) {
-        clientTurretRotationY = localPlayerState.turretRotation.y;
-        clientMantletRotationX = localPlayerState.mantletRotation.x;
+        targetTurretRotationY = localPlayerState.turretRotation.y;
+        targetMantletRotationX = localPlayerState.mantletRotation.x;
+        clientTurretRotationY = targetTurretRotationY;
+        clientMantletRotationX = targetMantletRotationX;
     }
 
     renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
@@ -512,12 +517,10 @@ function setupEventListeners() {
     document.addEventListener("mousemove", (e) => {
         if (!isGameStarted) return;
         
-        // Aktualizuj pozycję wizualnego celownika
         const crosshair = document.getElementById('crosshair');
         crosshair.style.left = e.clientX + 'px';
         crosshair.style.top = e.clientY + 'px';
         
-        // Przelicz pozycję myszy na współrzędne znormalizowane (-1 do 1)
         mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     });
@@ -546,36 +549,33 @@ function updateAim() {
 
     const playerTank = gameObjects.players[localPlayerId];
     
-    // Użyj raycastera do znalezienia punktu, w który celuje mysz
     raycaster.setFromCamera(mouse, camera);
     const intersectionPoint = new THREE.Vector3();
     
-    // Sprawdź przecięcie z płaszczyzną na poziomie gruntu (y=0)
     if (raycaster.ray.intersectPlane(aimPlane, intersectionPoint)) {
         const turretWorldPosition = new THREE.Vector3();
         playerTank.turret.getWorldPosition(turretWorldPosition);
         
-        // Wektor od wieży do punktu celowania
         const direction = intersectionPoint.clone().sub(turretWorldPosition);
         
-        // Kąt kadłuba, potrzebny do obliczenia lokalnego obrotu wieży
         const hullAngleY = playerTank.rotation.y;
-        
-        // Kąt globalny, w którym powinna być wieża
         const worldAngleY = Math.atan2(direction.x, direction.z);
         
-        // Kąt lokalny wieży względem kadłuba
-        clientTurretRotationY = worldAngleY - hullAngleY;
+        targetTurretRotationY = worldAngleY - hullAngleY;
 
-        // Oblicz kąt lufy (obrót w osi X)
         const horizontalDistance = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
-        clientMantletRotationX = -Math.atan2(direction.y, horizontalDistance);
-
-        // Ogranicz kąt lufy
-        const minMantletRot = -0.5; // Do góry
-        const maxMantletRot = 0.2;  // Do dołu
-        clientMantletRotationX = Math.max(minMantletRot, Math.min(maxMantletRot, clientMantletRotationX));
+        targetMantletRotationX = -Math.atan2(direction.y, horizontalDistance);
+        
+        const minMantletRot = -0.4;
+        const maxMantletRot = -0.02; 
+        targetMantletRotationX = Math.max(minMantletRot, Math.min(maxMantletRot, targetMantletRotationX));
     }
+}
+
+function getContainerName(type) {
+    if (type === 'machineGunBullet') return 'machineGunBullets';
+    if (type.endsWith('y')) return type.slice(0, -1) + 'ies';
+    return type + 's';
 }
 
 function reconcileGameState(serverState) {
@@ -605,11 +605,19 @@ function reconcileGameState(serverState) {
         }
     }
 }
+
 function createObjectMesh(payload) {
     const { type, data } = payload;
     let newMesh;
-    let container = gameObjects[type + 's'];
-    if(!container) return; if(container[data.id]) return;
+    const containerName = getContainerName(type);
+    let container = gameObjects[containerName];
+
+    if(!container) {
+        console.error(`Nie znaleziono kontenera dla typu: ${type} (szukano: ${containerName})`);
+        return;
+    }
+    if(container[data.id]) return;
+
     switch(type) {
         case 'projectile': newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 }) ); break;
         case 'machineGunBullet': newMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffa500 })); break;
@@ -617,7 +625,9 @@ function createObjectMesh(payload) {
             newMesh = new THREE.Group();
             const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 12), LAMBERT_MATERIAL(0xcccccc));
             const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 12), LAMBERT_MATERIAL(0xff0000));
-            tip.position.y = 1.5; newMesh.add(body, tip); break;
+            tip.position.y = 1.5;
+            newMesh.add(body, tip);
+            break;
         case 'mine': newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444)); break;
         case 'crate': newMesh = createSupplyCrate(); break;
     }
@@ -779,7 +789,6 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    // Obliczaj celowanie w każdej klatce
     updateAim();
 
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
@@ -789,6 +798,7 @@ function animate() {
         if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') { handleFireInput(); }
     }
 
+    // Wysyłaj na serwer aktualną, interpolowaną pozycję lufy
     socket.emit("playerInput", {
         keys,
         turretRotationY: clientTurretRotationY,
@@ -809,7 +819,11 @@ function animate() {
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
 
             if (id === localPlayerId) {
-                // Dla gracza lokalnego, bezpośrednio użyj wartości z myszy dla płynności
+                // Płynne podążanie lufy za celem (interpolacja)
+                const lerpFactor = delta * 5.0; 
+                clientTurretRotationY = THREE.MathUtils.lerp(clientTurretRotationY, targetTurretRotationY, lerpFactor);
+                clientMantletRotationX = THREE.MathUtils.lerp(clientMantletRotationX, targetMantletRotationX, lerpFactor);
+
                 clientTank.turret.rotation.y = clientTurretRotationY;
                 clientTank.mantlet.rotation.x = clientMantletRotationX;
             } else {
@@ -946,9 +960,7 @@ socket.on('objectCreated', (payload) => { createObjectMesh(payload); });
 
 socket.on('objectDestroyed', (payload) => {
     const { type, id, hit } = payload;
-    let containerName = type.endsWith('y') ? type.slice(0, -1) + 'ies' : type + 's';
-    if(type === 'machineGunBullet') containerName = 'machineGunBullets';
-
+    const containerName = getContainerName(type);
     const objectList = gameObjects[containerName];
     const object = objectList ? objectList[id] : null;
 

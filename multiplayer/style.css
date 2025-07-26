@@ -307,19 +307,17 @@ canvas {
   }
 }
 
-/* Celownik */
+/* Celownik - czerwona kropka */
 #crosshair {
   position: absolute;
-  /* Pozycja top/left jest ustawiana przez JavaScript */
-  transform: translate(-50%, -50%); /* Centruje celownik na koordynatach myszy */
-  width: 30px;
-  height: 30px;
-  background-image: 
-    radial-gradient(circle at center, red 2px, transparent 2px),
-    linear-gradient(to right, white 0%, white 35%, transparent 35%, transparent 65%, white 65%, white 100%),
-    linear-gradient(to bottom, white 0%, white 35%, transparent 35%, transparent 65%, white 65%, white 100%);
-  background-size: 100% 100%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  background-color: red;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 5px rgba(0,0,0,0.5);
   z-index: 99;
-  pointer-events: none; /* Zapobiega przechwytywaniu kliknięć przez celownik */
-  display: none; /* Domyślnie ukryty, pokazywany po starcie gry */
+  pointer-events: none;
+  display: none;
 }
