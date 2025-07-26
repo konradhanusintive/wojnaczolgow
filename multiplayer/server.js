@@ -238,11 +238,9 @@ function gameLoop() {
             if (checkPlayerBuildingCollision(player)) { player.position.z = oldPos.z; }
         }
         
-        // Zastosuj rotację wieży i lufy z danych wejściowych klienta
         player.turretRotation.y = player.input.turretRotationY;
         player.mantletRotation.x = player.input.mantletRotationX;
 
-        // Logika tonięcia: czołg tonie dopiero po zjechaniu z błota
         const safeZone = MAP_SIZE / 2 + MUD_BORDER_WIDTH;
         if (Math.abs(player.position.x) > safeZone || Math.abs(player.position.z) > safeZone) {
             if (!player.isSinking) {

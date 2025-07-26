@@ -14,8 +14,11 @@ let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 let clientTurretRotationY = 0;
 let clientMantletRotationX = 0;
-let lastMouseX = 0, lastMouseY = 0;
-let isFirstMouseMove = true;
+
+// Zmienne do celowania
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // Płaszczyzna celowania na poziomie gruntu (y=0)
 
 const keys = {};
 let canFire = true;
@@ -416,8 +419,8 @@ function initGame(payload) {
     document.getElementById('crosshair').style.display = 'block';
 
     minimapCanvas = document.getElementById('minimap');
-    minimapCanvas.width = 220; // Dopasowanie do CSS
-    minimapCanvas.height = 220; // Dopasowanie do CSS
+    minimapCanvas.width = 220;
+    minimapCanvas.height = 220;
     minimapCtx = minimapCanvas.getContext('2d');
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() }));
@@ -429,7 +432,7 @@ function initGame(payload) {
     const mudMaterial = new THREE.MeshLambertMaterial({ map: createMudTexture() });
     const mud = new THREE.Mesh(mudGeometry, mudMaterial);
     mud.rotation.x = -Math.PI / 2;
-    mud.position.y = -0.1; // Błoto jest tuż pod trawą
+    mud.position.y = -0.1;
     scene.add(mud);
 
     const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
@@ -442,7 +445,7 @@ function initGame(payload) {
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    water.position.y = -0.4; // Woda jest 0.4m poniżej lądu (y=0)
+    water.position.y = -0.4;
     scene.add(water);
 
     if (payload.spawnPoints) {
@@ -484,7 +487,6 @@ function handleFireInput() {
 function setupEventListeners() {
     document.addEventListener("keydown", (e) => {
         keys[e.code] = true;
-        // Strzał spacją/enterem wciąż działa jako alternatywa
         if (e.code === 'Space' || e.code === 'Enter') {
             e.preventDefault();
             handleFireInput();
@@ -509,32 +511,15 @@ function setupEventListeners() {
 
     document.addEventListener("mousemove", (e) => {
         if (!isGameStarted) return;
-
+        
+        // Aktualizuj pozycję wizualnego celownika
         const crosshair = document.getElementById('crosshair');
         crosshair.style.left = e.clientX + 'px';
         crosshair.style.top = e.clientY + 'px';
-
-        if (isFirstMouseMove) {
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
-            isFirstMouseMove = false;
-            return;
-        }
-
-        const deltaX = e.clientX - lastMouseX;
-        const deltaY = e.clientY - lastMouseY;
-        lastMouseX = e.clientX;
-        lastMouseY = e.clientY;
-
-        const sensitivity = 0.003;
-        clientTurretRotationY -= deltaX * sensitivity;
         
-        // POPRAWKA: + zamiast - aby ruch w dół (dodatni deltaY) powodował ruch lufy w dół
-        clientMantletRotationX += deltaY * sensitivity;
-
-        const minMantletRot = -0.5;
-        const maxMantletRot = 0.2;
-        clientMantletRotationX = Math.max(minMantletRot, Math.min(maxMantletRot, clientMantletRotationX));
+        // Przelicz pozycję myszy na współrzędne znormalizowane (-1 do 1)
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     });
 
     document.addEventListener("keyup", (e) => {
@@ -555,6 +540,44 @@ function setupEventListeners() {
     });
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
 }
+
+function updateAim() {
+    if (!camera || !gameObjects.players[localPlayerId]) return;
+
+    const playerTank = gameObjects.players[localPlayerId];
+    
+    // Użyj raycastera do znalezienia punktu, w który celuje mysz
+    raycaster.setFromCamera(mouse, camera);
+    const intersectionPoint = new THREE.Vector3();
+    
+    // Sprawdź przecięcie z płaszczyzną na poziomie gruntu (y=0)
+    if (raycaster.ray.intersectPlane(aimPlane, intersectionPoint)) {
+        const turretWorldPosition = new THREE.Vector3();
+        playerTank.turret.getWorldPosition(turretWorldPosition);
+        
+        // Wektor od wieży do punktu celowania
+        const direction = intersectionPoint.clone().sub(turretWorldPosition);
+        
+        // Kąt kadłuba, potrzebny do obliczenia lokalnego obrotu wieży
+        const hullAngleY = playerTank.rotation.y;
+        
+        // Kąt globalny, w którym powinna być wieża
+        const worldAngleY = Math.atan2(direction.x, direction.z);
+        
+        // Kąt lokalny wieży względem kadłuba
+        clientTurretRotationY = worldAngleY - hullAngleY;
+
+        // Oblicz kąt lufy (obrót w osi X)
+        const horizontalDistance = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
+        clientMantletRotationX = -Math.atan2(direction.y, horizontalDistance);
+
+        // Ogranicz kąt lufy
+        const minMantletRot = -0.5; // Do góry
+        const maxMantletRot = 0.2;  // Do dołu
+        clientMantletRotationX = Math.max(minMantletRot, Math.min(maxMantletRot, clientMantletRotationX));
+    }
+}
+
 function reconcileGameState(serverState) {
     const serverPlayerIds = Object.keys(serverState.players || {});
     for (const id of serverPlayerIds) {
@@ -756,10 +779,13 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
+    // Obliczaj celowanie w każdej klatce
+    updateAim();
+
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
 
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
-    if(keys['mouse0']) { // Dodatkowe sprawdzenie dla karabinu maszynowego
+    if(keys['mouse0']) {
         if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') { handleFireInput(); }
     }
 
