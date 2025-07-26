@@ -21,7 +21,7 @@ const SPAWN_POINTS = [
     { x: 141, z: 141 }, { x: -141, z: -141 },
     { x: 141, z: -141 },{ x: -141, z: 141 }
 ];
-const SPAWN_CLEARANCE_RADIUS = 35; 
+const SPAWN_CLEARANCE_RADIUS = 35;
 
 // --- Stałe generacji miasta ---
 const CITY_GRID_SIZE = 20;
@@ -58,7 +58,7 @@ function handleDamage(player, amount, attackerId) {
     player.health -= amount;
     if (player.health <= 0) {
         player.isDestroyed = true;
-        player.respawnTimer = 3.0; 
+        player.respawnTimer = 3.0;
         const owner = gameState.players[attackerId];
         if (owner && owner.id !== player.id) {
              owner.score++;
@@ -184,26 +184,26 @@ function gameLoop() {
     // --- Aktualizacja Graczy ---
     for (const id in gameState.players) {
         const player = gameState.players[id];
-        
+
         if (player.isSinking) {
             player.sinkingTimer -= delta;
             player.position.y -= 3.5 * delta;
             if (player.sinkingTimer <= 0) {
                 player.isDestroyed = true;
-                player.respawnTimer = 3.0; 
-                player.isSinking = false; 
+                player.respawnTimer = 3.0;
+                player.isSinking = false;
                 player.sinkingAngle = { x: 0, z: 0 };
                 io.emit('objectDestroyed', { type: 'player', id: player.id, attackerId: id, hit: false });
             }
-            continue; 
+            continue;
         }
-        
+
         if (player.isDestroyed) {
             player.respawnTimer -= delta;
             if (player.respawnTimer <= 0) {
                 const tankData = TANKS_DATA[player.tankType];
-                player.health = tankData.stats.hp; 
-                player.ammo = 8; 
+                player.health = tankData.stats.hp;
+                player.ammo = 8;
                 player.isDestroyed = false;
                 const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
                 player.position = { x: spawnPoint.x, y: tankData.startY, z: spawnPoint.z };
@@ -218,16 +218,16 @@ function gameLoop() {
         const oldPos = { ...player.position };
         const moveVector = { x: 0, z: 0 };
 
-        if (player.keys.KeyW || player.keys.ArrowUp) {
+        if (player.input.keys.KeyW || player.input.keys.ArrowUp) {
             moveVector.x += Math.sin(player.rotation.y) * moveSpeed;
             moveVector.z += Math.cos(player.rotation.y) * moveSpeed;
         }
-        if (player.keys.KeyS || player.keys.ArrowDown) {
+        if (player.input.keys.KeyS || player.input.keys.ArrowDown) {
             moveVector.x -= Math.sin(player.rotation.y) * moveSpeed;
             moveVector.z -= Math.cos(player.rotation.y) * moveSpeed;
         }
-        if (player.keys.KeyA || player.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
-        if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
+        if (player.input.keys.KeyA || player.input.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
+        if (player.input.keys.KeyD || player.input.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
 
         if (moveVector.x !== 0 || moveVector.z !== 0) {
             const newPosX = oldPos.x + moveVector.x;
@@ -238,10 +238,9 @@ function gameLoop() {
             if (checkPlayerBuildingCollision(player)) { player.position.z = oldPos.z; }
         }
         
-        if (player.keys.KeyQ || player.keys.BracketLeft) player.turretRotation.y += rotateSpeed;
-        if (player.keys.KeyE || player.keys.BracketRight) player.turretRotation.y -= rotateSpeed;
-        if ((player.keys.KeyF || player.keys.Semicolon) && player.mantletRotation.x > -0.5) player.mantletRotation.x -= rotateSpeed * 0.5;
-        if ((player.keys.KeyV || player.keys.Quote) && player.mantletRotation.x < 0.2) player.mantletRotation.x += rotateSpeed * 0.5;
+        // Zastosuj rotację wieży i lufy z danych wejściowych klienta
+        player.turretRotation.y = player.input.turretRotationY;
+        player.mantletRotation.x = player.input.mantletRotationX;
 
         // Logika tonięcia: czołg tonie dopiero po zjechaniu z błota
         const safeZone = MAP_SIZE / 2 + MUD_BORDER_WIDTH;
@@ -291,7 +290,7 @@ function gameLoop() {
         p.position.x += dirX * p.velocity * delta; p.position.y += dirY * p.velocity * delta; p.position.z += dirZ * p.velocity * delta;
         p.lifespan -= delta;
         let destroyed = false;
-        
+
         for (const playerId in gameState.players) {
             if (p.ownerId === playerId) continue; const player = gameState.players[playerId]; if (player.isDestroyed || player.isSinking) continue;
             const distance = Math.sqrt((p.position.x - player.position.x) ** 2 + (p.position.z - player.position.z) ** 2);
@@ -321,12 +320,12 @@ function gameLoop() {
             }
         }
         if (p.lifespan <= 0 || destroyed || p.position.y < -5) {
-            delete projGroup.list[id]; 
-            io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: destroyed }); 
+            delete projGroup.list[id];
+            io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: destroyed });
         }
     }
   }
-  
+
   for (const id in gameState.missiles) {
       const m = gameState.missiles[id]; m.lifespan -= delta; let targetPlayer = null; let minDistance = Infinity;
       for(const pId in gameState.players) {
@@ -355,7 +354,7 @@ function gameLoop() {
       const player = gameState.players[id];
       if (player.powerUpTimer > 0) { player.powerUpTimer -= delta; if (player.powerUpTimer <= 0) { deactivatePowerUp(id); } }
   }
-  
+
   if (Object.keys(gameState.crates).length < 3) {
       crateSpawnTimer -= delta;
       if (crateSpawnTimer <= 0) {
@@ -396,7 +395,7 @@ function checkPlayerBuildingCollision(player) {
             player.position.x - playerRadius > bPos.x + bDim.x / 2 ||
             player.position.z + playerRadius < bPos.z - bDim.z / 2 ||
             player.position.z - playerRadius > bPos.z + bDim.z / 2) {
-            continue; 
+            continue;
         }
 
         for (const brick of building.bricks) {
@@ -429,11 +428,11 @@ function createProceduralCity() {
                     y: 0,
                     z: cityOrigin.z + j * CITY_CELL_SIZE + CITY_CELL_SIZE / 2,
                 };
-                
+
                 if (Math.abs(position.x) > MAP_SIZE / 2 || Math.abs(position.z) > MAP_SIZE / 2) {
                     continue;
                 }
-                
+
                 let isTooCloseToSpawn = false;
                 for(const sp of SPAWN_POINTS) {
                     const distance = Math.sqrt((position.x - sp.x)**2 + (position.z - sp.z)**2);
@@ -445,13 +444,13 @@ function createProceduralCity() {
                 if (isTooCloseToSpawn || Math.sqrt(position.x**2 + position.z**2) < 50) {
                     continue;
                 }
-                
+
                 const id = `bld_${nextObjectId++}`;
                 const floors = BUILDING_MIN_FLOORS + Math.floor(Math.random() * (BUILDING_MAX_FLOORS - BUILDING_MIN_FLOORS));
                 const widthBricks = 5 + Math.floor(Math.random() * 5);
                 const depthBricks = 5 + Math.floor(Math.random() * 5);
                 const dimensions = { x: widthBricks * BRICK_SIZE.x, y: floors * BRICK_SIZE.y, z: depthBricks * BRICK_SIZE.z };
-                
+
                 const bricks = [];
                 for (let y = 0; y < floors; y++) {
                     for (let x = 0; x < widthBricks; x++) {
@@ -485,21 +484,26 @@ io.on("connection", (socket) => {
     gameState.players[socket.id] = {
       id: socket.id, tankType: tankType, position: startPos, rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 }, turretRotation: { x: 0, y: 0, z: 0 },
       mantletRotation: { x: 0, y: 0, z: 0 }, health: tankData.stats.hp, maxHealth: tankData.stats.hp, ammo: 8, medkits: 3, score: 0,
-      isReloading: false, isDestroyed: false, respawnTimer: 0, keys: {},
+      isReloading: false, isDestroyed: false, respawnTimer: 0,
+      input: { keys: {}, turretRotationY: 0, mantletRotationX: 0 },
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
       isSinking: false, sinkingTimer: 0, sinkingAngle: { x: 0, z: 0 },
     };
-    
-    socket.emit("gameStarted", { 
-        playerId: socket.id, 
+
+    socket.emit("gameStarted", {
+        playerId: socket.id,
         initialState: gameState,
         spawnPoints: SPAWN_POINTS
     });
-    
+
     socket.broadcast.emit("playerConnected", gameState.players[socket.id]);
     console.log(`Gracz ${socket.id} wybrał czołg ${tankType}.`);
   });
-  socket.on("playerInput", (keys) => { if (gameState.players[socket.id]) { gameState.players[socket.id].keys = keys; } });
+  socket.on("playerInput", (input) => {
+      if (gameState.players[socket.id]) {
+          gameState.players[socket.id].input = input;
+      }
+  });
   socket.on("playerAction", (action) => { handlePlayerAction(socket, action); });
   socket.on("disconnect", () => {
     console.log(`Gracz rozłączony: ${socket.id}`);
