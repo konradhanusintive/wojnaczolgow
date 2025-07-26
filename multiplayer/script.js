@@ -11,6 +11,7 @@ let isSelectionScreenActive = false;
 let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial;
 let minimapCanvas, minimapCtx;
+let minimapScanAngle = 0;
 
 const keys = {};
 let canFire = true;
@@ -402,6 +403,8 @@ function initGame(payload) {
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
     
     minimapCanvas = document.getElementById('minimap');
+    minimapCanvas.width = 220; // Dopasowanie do CSS
+    minimapCanvas.height = 220; // Dopasowanie do CSS
     minimapCtx = minimapCanvas.getContext('2d');
     
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() }));
@@ -539,7 +542,7 @@ function createObjectMesh(payload) {
     }
 }
 
-const MINIMAP_VIEW_RADIUS = 120; 
+const MINIMAP_VIEW_RADIUS = 250; 
 
 function drawMinimap() {
     if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || !minimapCtx) {
@@ -547,89 +550,150 @@ function drawMinimap() {
     }
     
     const localPlayer = clientGameState.players[localPlayerId];
-    minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-
     if (localPlayer.isDestroyed || localPlayer.isSinking) {
+        minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
         return; 
     }
     
-    const centerX = minimapCanvas.width / 2;
-    const centerY = minimapCanvas.height / 2;
-    const scale = minimapCanvas.width / (MINIMAP_VIEW_RADIUS * 2);
+    const ctx = minimapCtx;
+    const canvas = minimapCanvas;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const radius = canvas.width / 2;
+    const scale = radius / MINIMAP_VIEW_RADIUS;
     
-    const playerAngle = -localPlayer.rotation.y;
+    // --- Transformacje ---
+    const playerAngle = -localPlayer.rotation.y + Math.PI; // POPRAWKA: Obrót o 180 stopni
     const cosAngle = Math.cos(playerAngle);
     const sinAngle = Math.sin(playerAngle);
     
     const transformPoint = (x, z) => {
         const dx = x - localPlayer.position.x;
         const dz = z - localPlayer.position.z;
-        
-        if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) {
-            return null;
-        }
-
+        if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) return null;
         const rotatedX = dx * cosAngle - dz * sinAngle;
         const rotatedZ = dx * sinAngle + dz * cosAngle;
-
-        return {
-            x: centerX + rotatedX * scale,
-            y: centerY - rotatedZ * scale
-        };
+        return { x: centerX + rotatedX * scale, y: centerY - rotatedZ * scale };
     };
     
-    minimapCtx.fillStyle = 'rgba(100, 100, 100, 0.5)';
-    for (const id in clientGameState.buildings) {
+    // --- Rysowanie tła i siatki ---
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.clip();
+    
+    ctx.fillStyle = 'rgba(10, 25, 10, 0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.strokeStyle = 'rgba(50, 255, 50, 0.2)';
+    ctx.lineWidth = 1;
+    [0.33, 0.66].forEach(r => {
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius * r, 0, Math.PI * 2);
+        ctx.stroke();
+    });
+    ctx.beginPath();
+    ctx.moveTo(centerX - radius, centerY); ctx.lineTo(centerX + radius, centerY);
+    ctx.moveTo(centerX, centerY - radius); ctx.lineTo(centerX, centerY + radius);
+    ctx.stroke();
+
+    // --- Rysowanie obiektów ---
+    const currentTime = Date.now();
+
+    // Budynki (jako pojedyncze, obrócone prostokąty)
+    ctx.fillStyle = 'rgba(50, 200, 50, 0.25)';
+    for (const id in gameObjects.buildings) {
         const buildingData = gameObjects.buildings[id]?.data;
         if (!buildingData) continue;
 
         const bPos = buildingData.position;
         const bDim = buildingData.dimensions;
+        const halfW = bDim.x / 2;
+        const halfD = bDim.z / 2;
 
-        if (Math.abs(bPos.x - localPlayer.position.x) > MINIMAP_VIEW_RADIUS + bDim.x/2 ||
-            Math.abs(bPos.z - localPlayer.position.z) > MINIMAP_VIEW_RADIUS + bDim.z/2) {
-            continue;
-        }
+        const corners = [
+            { x: bPos.x - halfW, z: bPos.z - halfD },
+            { x: bPos.x + halfW, z: bPos.z - halfD },
+            { x: bPos.x + halfW, z: bPos.z + halfD },
+            { x: bPos.x - halfW, z: bPos.z + halfD },
+        ];
 
-        for(const brick of buildingData.bricks) {
-            if(!brick) continue;
-            const transformed = transformPoint(bPos.x + brick.x, bPos.z + brick.z);
-            if (transformed) {
-                 const w = buildingData.brickSize.x * scale;
-                 const h = buildingData.brickSize.z * scale;
-                 minimapCtx.fillRect(transformed.x - w / 2, transformed.y - h / 2, w, h);
-            }
+        const transformedCorners = corners.map(c => transformPoint(c.x, c.z));
+
+        if (transformedCorners.some(c => c === null)) continue;
+        
+        ctx.beginPath();
+        ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y);
+        for(let i = 1; i < transformedCorners.length; i++) {
+            ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y);
         }
+        ctx.closePath();
+        ctx.fill();
     }
-
-    minimapCtx.fillStyle = '#ffc107'; // Yellow for crates
+    
+    // Skrzynki (migające)
+    const crateBlink = Math.sin(currentTime * 0.005) * 0.4 + 0.6;
+    ctx.fillStyle = `rgba(255, 223, 0, ${crateBlink})`;
+    ctx.strokeStyle = `rgba(255, 223, 0, ${crateBlink + 0.2})`;
+    ctx.lineWidth = 2;
     for (const id in clientGameState.crates) {
         const crate = clientGameState.crates[id];
         const transformed = transformPoint(crate.position.x, crate.position.z);
         if (transformed) {
-            minimapCtx.fillRect(transformed.x - 3, transformed.y - 3, 6, 6);
+            ctx.beginPath();
+            ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8);
+            ctx.fill();
+            ctx.stroke();
         }
     }
-    
-    minimapCtx.fillStyle = '#cc3333'; // Red for enemies
+
+    // Wrogowie (czerwone "blipy")
+    ctx.fillStyle = '#ff1a1a';
     for (const id in clientGameState.players) {
         if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
         const player = clientGameState.players[id];
         const transformed = transformPoint(player.position.x, player.position.z);
         if (transformed) {
-             minimapCtx.beginPath();
-             minimapCtx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2);
-             minimapCtx.fill();
+             ctx.beginPath();
+             ctx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2);
+             ctx.fill();
         }
     }
-    
-    minimapCtx.fillStyle = '#38a849'; // Green for local player
-    minimapCtx.beginPath();
-    minimapCtx.moveTo(centerX, centerY - 8);
-    minimapCtx.lineTo(centerX - 5, centerY + 5);
-    minimapCtx.lineTo(centerX + 5, centerY + 5);
-    minimapCtx.closePath();
-    minimapCtx.fill();
+
+    // --- Linia skanująca ---
+    const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+    sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)');
+    sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)');
+    sweepGradient.addColorStop(1, 'rgba(128, 255, 128, 0)');
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.arc(centerX, centerY, radius, minimapScanAngle, minimapScanAngle + Math.PI * 0.3);
+    ctx.closePath();
+    ctx.fillStyle = sweepGradient;
+    ctx.fill();
+    ctx.restore(); // Zdejmuje clipping path
+
+    // --- Ikona gracza ---
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.fillStyle = '#66ff66';
+    ctx.shadowColor = '#66ff66';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(-6, 8);
+    ctx.lineTo(6, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // --- Ramka zewnętrzna ---
+    ctx.strokeStyle = 'rgba(50, 255, 50, 0.8)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius - 1.5, 0, Math.PI * 2);
+    ctx.stroke();
 }
 
 
@@ -638,6 +702,8 @@ function animate() {
     if (!isGameStarted) return;
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
+
+    minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2); // Obrót linii skanującej
 
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
     if(keys['Space'] || keys['Enter']) {
