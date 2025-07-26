@@ -10,6 +10,7 @@ let isGameStarted = false;
 let isSelectionScreenActive = false;
 let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial;
+let minimapCanvas, minimapCtx;
 
 const keys = {};
 let canFire = true;
@@ -279,8 +280,17 @@ function animateSelectionScreen() {
     selectionRenderers.forEach((item) => { item.tankMesh.rotation.y += 0.01; item.renderer.render(item.scene, item.camera); });
 }
 function updateHUD() {
-    const hudEl = document.getElementById('hud'); if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId]) { hudEl.style.display = 'none'; return; }
-    hudEl.style.display = 'block'; const playerState = clientGameState.players[localPlayerId]; const maxHealth = playerState.maxHealth;
+    const hudEl = document.getElementById('hud'); 
+    const minimapEl = document.getElementById('minimap-container');
+    if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId]) { 
+        hudEl.style.display = 'none'; 
+        minimapEl.style.display = 'none';
+        return; 
+    }
+    hudEl.style.display = 'block'; 
+    minimapEl.style.display = 'block';
+    
+    const playerState = clientGameState.players[localPlayerId]; const maxHealth = playerState.maxHealth;
     document.getElementById('hp-value').innerText = `${Math.max(0, playerState.health.toFixed(0))} / ${maxHealth}`; const hpPercent = (Math.max(0, playerState.health) / maxHealth) * 100;
     const hpBar = document.getElementById('hp-bar'); hpBar.style.width = `${hpPercent}%`; hpBar.className = `hud-bar-fill ${hpPercent < 30 ? "low" : ""}`;
     document.getElementById('ammo-value').innerText = `${playerState.ammo} / 8 ${playerState.isReloading ? '(Przeładowuję...)' : ''}`;
@@ -366,6 +376,22 @@ function displayKillNotification(attackerId, victimId) {
     }, 5000); 
 }
 
+function displayJoinNotification(playerId) {
+    const container = document.getElementById('kill-feed-container');
+    if (!container) return;
+
+    const playerName = `Gracz ${playerId.substring(0, 5)}`;
+    const notificationElement = document.createElement('div');
+    notificationElement.className = 'join-notification';
+    notificationElement.innerHTML = `👋 ${playerName} dołączył do bitwy!`;
+
+    container.appendChild(notificationElement);
+
+    setTimeout(() => {
+        notificationElement.remove();
+    }, 5000);
+}
+
 
 // --- LOGIKA GRY (KLIENT) ---
 function initGame(payload) {
@@ -374,6 +400,9 @@ function initGame(payload) {
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, 200, 450);
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
+    
+    minimapCanvas = document.getElementById('minimap');
+    minimapCtx = minimapCanvas.getContext('2d');
     
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() }));
     ground.rotation.x = -Math.PI / 2;
@@ -509,6 +538,100 @@ function createObjectMesh(payload) {
         scene.add(newMesh);
     }
 }
+
+const MINIMAP_VIEW_RADIUS = 120; 
+
+function drawMinimap() {
+    if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || !minimapCtx) {
+        return;
+    }
+    
+    const localPlayer = clientGameState.players[localPlayerId];
+    minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+
+    if (localPlayer.isDestroyed || localPlayer.isSinking) {
+        return; 
+    }
+    
+    const centerX = minimapCanvas.width / 2;
+    const centerY = minimapCanvas.height / 2;
+    const scale = minimapCanvas.width / (MINIMAP_VIEW_RADIUS * 2);
+    
+    const playerAngle = -localPlayer.rotation.y;
+    const cosAngle = Math.cos(playerAngle);
+    const sinAngle = Math.sin(playerAngle);
+    
+    const transformPoint = (x, z) => {
+        const dx = x - localPlayer.position.x;
+        const dz = z - localPlayer.position.z;
+        
+        if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) {
+            return null;
+        }
+
+        const rotatedX = dx * cosAngle - dz * sinAngle;
+        const rotatedZ = dx * sinAngle + dz * cosAngle;
+
+        return {
+            x: centerX + rotatedX * scale,
+            y: centerY - rotatedZ * scale
+        };
+    };
+    
+    minimapCtx.fillStyle = 'rgba(100, 100, 100, 0.5)';
+    for (const id in clientGameState.buildings) {
+        const buildingData = gameObjects.buildings[id]?.data;
+        if (!buildingData) continue;
+
+        const bPos = buildingData.position;
+        const bDim = buildingData.dimensions;
+
+        if (Math.abs(bPos.x - localPlayer.position.x) > MINIMAP_VIEW_RADIUS + bDim.x/2 ||
+            Math.abs(bPos.z - localPlayer.position.z) > MINIMAP_VIEW_RADIUS + bDim.z/2) {
+            continue;
+        }
+
+        for(const brick of buildingData.bricks) {
+            if(!brick) continue;
+            const transformed = transformPoint(bPos.x + brick.x, bPos.z + brick.z);
+            if (transformed) {
+                 const w = buildingData.brickSize.x * scale;
+                 const h = buildingData.brickSize.z * scale;
+                 minimapCtx.fillRect(transformed.x - w / 2, transformed.y - h / 2, w, h);
+            }
+        }
+    }
+
+    minimapCtx.fillStyle = '#ffc107'; // Yellow for crates
+    for (const id in clientGameState.crates) {
+        const crate = clientGameState.crates[id];
+        const transformed = transformPoint(crate.position.x, crate.position.z);
+        if (transformed) {
+            minimapCtx.fillRect(transformed.x - 3, transformed.y - 3, 6, 6);
+        }
+    }
+    
+    minimapCtx.fillStyle = '#cc3333'; // Red for enemies
+    for (const id in clientGameState.players) {
+        if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
+        const player = clientGameState.players[id];
+        const transformed = transformPoint(player.position.x, player.position.z);
+        if (transformed) {
+             minimapCtx.beginPath();
+             minimapCtx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2);
+             minimapCtx.fill();
+        }
+    }
+    
+    minimapCtx.fillStyle = '#38a849'; // Green for local player
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(centerX, centerY - 8);
+    minimapCtx.lineTo(centerX - 5, centerY + 5);
+    minimapCtx.lineTo(centerX + 5, centerY + 5);
+    minimapCtx.closePath();
+    minimapCtx.fill();
+}
+
 
 // --- GŁÓWNA PĘTLA RENDEROWANIA ---
 function animate() {
@@ -654,6 +777,7 @@ function animate() {
     }
 
     updateHUD();
+    drawMinimap();
     renderer.render(scene, camera);
 }
 
@@ -711,6 +835,7 @@ socket.on("playerConnected", (playerData) => {
     tank.isSinkingBubbleShown = false;
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
+    displayJoinNotification(playerData.id);
 });
 socket.on("playerDisconnected", (id) => {
     if (clientGameState.players && clientGameState.players[id]) { delete clientGameState.players[id]; }
