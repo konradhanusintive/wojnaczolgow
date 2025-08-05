@@ -147,6 +147,7 @@ function createBuildingMesh(buildingData) {
     instancedMesh.instanceMatrix.needsUpdate = true;
     gameObjects.buildings[id] = { mesh: instancedMesh, data: buildingData, };
     scene.add(instancedMesh);
+    aimables.push(instancedMesh);
 }
 function createBrickDebris(position, count) {
     if (!brickMaterial) return;
@@ -215,6 +216,24 @@ function createSpawnMarker() {
     flag.position.set(1.5, 6.5, 0);
     marker.add(flag);
     return marker;
+}
+
+// NOWOŚĆ: Funkcja pomocnicza do tworzenia lasera
+function createPlayerLaser() {
+    const laserGeometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(2 * 3); // 2 wierzchołki, po 3 koordynaty
+    laserGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const laserMaterial = new THREE.LineBasicMaterial({
+        color: 0xff0000,
+        transparent: true,
+        opacity: 0.6,
+        linewidth: 2, // może wymagać LineMaterial z addons
+    });
+    const laser = new THREE.Line(laserGeometry, laserMaterial);
+    laser.frustumCulled = false;
+    laser.visible = false; // Domyślnie niewidoczny
+    scene.add(laser);
+    return laser;
 }
 
 function createSmokeTexture() {
@@ -495,6 +514,7 @@ function setupEventListeners() {
         if (e.code === 'KeyR') socket.emit('playerAction', { type: 'reload' });
         if (e.code === 'KeyB') socket.emit('playerAction', { type: 'heal' });
         if (e.code === 'KeyG') socket.emit('playerAction', { type: 'dropMine' });
+        if (e.code === 'KeyL') socket.emit('playerAction', { type: 'toggleLaser' }); // NOWOŚĆ: Przełączanie lasera
     });
     const menuEl = document.getElementById("menu"), mapEl = document.getElementById("map-overlay"), scoreEl = document.getElementById("score-overlay");
     document.addEventListener("keydown", (e) => {
@@ -522,7 +542,6 @@ function setupEventListeners() {
     document.addEventListener('contextmenu', e => e.preventDefault());
 }
 
-// ... reszta funkcji (reconcile, createObjectMesh) bez zmian ...
 function reconcileGameState(serverState) {
     const serverPlayerIds = Object.keys(serverState.players || {});
     for (const id of serverPlayerIds) {
@@ -531,6 +550,10 @@ function reconcileGameState(serverState) {
             const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
             tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
             tank.isSinkingBubbleShown = false;
+            
+            // NOWOŚĆ: Dodaj laser do obiektu gracza
+            tank.laserSight = createPlayerLaser();
+
             scene.add(tank); 
             gameObjects.players[id] = tank;
         }
@@ -745,42 +768,60 @@ function animate() {
     socket.emit("playerInput", keys);
 
     for (const id in clientGameState.players) {
-        const serverTank = clientGameState.players[id];
+        const serverPlayer = clientGameState.players[id];
         const clientTank = gameObjects.players[id];
-        if (clientTank && serverTank) {
-            clientTank.visible = !serverTank.isDestroyed;
+        if (clientTank && serverPlayer) {
+            clientTank.visible = !serverPlayer.isDestroyed;
             
-            clientTank.position.lerp(new THREE.Vector3(serverTank.position.x, serverTank.position.y, serverTank.position.z), 0.25);
+            clientTank.position.lerp(new THREE.Vector3(serverPlayer.position.x, serverPlayer.position.y, serverPlayer.position.z), 0.25);
             
-            const targetChassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.rotation.y, 0));
-            const targetTiltQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverTank.sinkingAngle.x, 0, serverTank.sinkingAngle.z));
+            const targetChassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverPlayer.rotation.y, 0));
+            const targetTiltQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverPlayer.sinkingAngle.x, 0, serverPlayer.sinkingAngle.z));
             const finalQuaternion = targetChassisQuaternion.multiply(targetTiltQuaternion);
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
             
-            // Tylko inni gracze mają wieżyczkę aktualizowaną z serwera, lokalny gracz ma natychmiastową
             if (id !== localPlayerId) {
-                clientTank.turret.rotation.y = serverTank.turretRotation.y;
-                clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
+                clientTank.turret.rotation.y = serverPlayer.turretRotation.y;
+                clientTank.mantlet.rotation.x = serverPlayer.mantletRotation.x;
             }
             
-            if (serverTank.isSinking && !clientTank.isSinkingBubbleShown) {
+            if (serverPlayer.isSinking && !clientTank.isSinkingBubbleShown) {
                 showCustomQuote(id, "Bul... bul... bul...");
                 clientTank.isSinkingBubbleShown = true;
-            } else if (!serverTank.isSinking && clientTank.isSinkingBubbleShown) {
+            } else if (!serverPlayer.isSinking && clientTank.isSinkingBubbleShown) {
                 const bubble = document.getElementById(`bubble-${id}`);
                 if (bubble) bubble.style.display = 'none';
                 clientTank.isSinkingBubbleShown = false;
             }
 
             clientTank.smokeCooldown = (clientTank.smokeCooldown || 0) - delta;
-            if (clientTank.smokeCooldown <= 0 && !serverTank.isDestroyed && !serverTank.isSinking) {
-                const hpPercent = (serverTank.health / serverTank.maxHealth) * 100;
+            if (clientTank.smokeCooldown <= 0 && !serverPlayer.isDestroyed && !serverPlayer.isSinking) {
+                const hpPercent = (serverPlayer.health / serverPlayer.maxHealth) * 100;
                 if (hpPercent < 30) {
                     emitSmokeParticle(clientTank, blackSmokeMaterial);
                     clientTank.smokeCooldown = 0.08;
                 } else if (hpPercent < 45) {
                     emitSmokeParticle(clientTank, greySmokeMaterial);
                     clientTank.smokeCooldown = 0.2;
+                }
+            }
+
+            // NOWOŚĆ: Aktualizacja laserów wszystkich graczy
+            if (clientTank.laserSight && serverPlayer.laserData) {
+                const laser = clientTank.laserSight;
+                const data = serverPlayer.laserData;
+                const isVisible = data.enabled && !serverPlayer.isDestroyed && !serverPlayer.isSinking;
+                laser.visible = isVisible;
+
+                if (isVisible) {
+                    const positions = laser.geometry.attributes.position.array;
+                    positions[0] = data.start.x;
+                    positions[1] = data.start.y;
+                    positions[2] = data.start.z;
+                    positions[3] = data.end.x;
+                    positions[4] = data.end.y;
+                    positions[5] = data.end.z;
+                    laser.geometry.attributes.position.needsUpdate = true;
                 }
             }
         }
@@ -857,7 +898,7 @@ function animate() {
         }
     }
 
-    // --- NOWA LOGIKA CELOWANIA I KAMERY ---
+    // --- LOGIKA CELOWANIA LOKALNEGO GRACZA I KAMERY ---
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
         const localPlayerState = clientGameState.players[localPlayerId];
@@ -869,7 +910,6 @@ function animate() {
         if (intersects.length > 0) {
             targetPoint.copy(intersects[0].point);
         } else {
-            // Jeśli nie trafiono w nic, rzutuj na płaszczyznę na wysokości czołgu
             const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -localPlayerMesh.position.y);
             raycaster.ray.intersectPlane(plane, targetPoint);
         }
@@ -878,27 +918,14 @@ function animate() {
             // 2. Obróć wieżę i lufę w kierunku celu
             const turret = localPlayerMesh.turret;
             const mantlet = localPlayerMesh.mantlet;
-            const chassis = turret.parent; // Kadłub jest rodzicem wieży
-
-            // Przekształć światowy punkt docelowy na lokalny względem KADŁUBA
+            const chassis = turret.parent;
             const localTargetInChassis = chassis.worldToLocal(targetPoint.clone());
-
-            // Oblicz docelowy kąt obrotu wieży (oś Y) względem kadłuba
             const targetTurretAngle = Math.atan2(localTargetInChassis.x, localTargetInChassis.z);
-            
-            // Płynna interpolacja kąta, która zawsze wybiera najkrótszą drogę
             let currentAngle = turret.rotation.y;
             let diff = targetTurretAngle - currentAngle;
-            
-            // Zawijaj różnicę kąta, aby upewnić się, że jest w zakresie (-PI, PI)
             while (diff < -Math.PI) diff += 2 * Math.PI;
             while (diff > Math.PI) diff -= 2 * Math.PI;
-
-            // Zastosuj część różnicy, aby uzyskać płynny ruch
             turret.rotation.y += diff * 0.15;
-
-
-            // Obrót lufy/mantletu (oś X) jest obliczany względem wieży
             const localTargetInTurret = turret.worldToLocal(targetPoint.clone());
             const targetMantletAngle = Math.atan2(localTargetInTurret.y, Math.sqrt(localTargetInTurret.x**2 + localTargetInTurret.z**2));
             mantlet.rotation.x = THREE.MathUtils.lerp(mantlet.rotation.x, Math.max(-0.5, Math.min(0.2, targetMantletAngle)), 0.15);
@@ -907,6 +934,11 @@ function animate() {
             localPlayerState.turretRotation.y = turret.rotation.y;
             localPlayerState.mantletRotation.x = mantlet.rotation.x;
             socket.emit('playerAimUpdate', { turretY: turret.rotation.y, mantletX: mantlet.rotation.x });
+
+            // NOWOŚĆ: Wyślij dane o laserze do serwera
+            const barrelWorldPos = new THREE.Vector3();
+            localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
+            socket.emit('laserUpdate', { start: barrelWorldPos, end: targetPoint });
         }
         
         // 4. Logika kamery
@@ -917,7 +949,6 @@ function animate() {
         } else {
             camera.fov = 75;
             camera.updateProjectionMatrix();
-
             const offset = new THREE.Vector3(0, 20, -30);
             const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
             camera.position.lerp(cameraTargetPosition, 0.1);
@@ -934,7 +965,6 @@ function animate() {
 socket.on("connect", () => console.log("Połączono z serwerem!", socket.id));
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
 socket.on("gameStateUpdate", (serverState) => {
-    // Zachowaj lokalną, płynną pozycję wieżyczki dla gracza
     if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
         serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;
         serverState.players[localPlayerId].mantletRotation = clientGameState.players[localPlayerId].mantletRotation;
@@ -989,9 +1019,12 @@ socket.on("playerConnected", (playerData) => {
     tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
     tank.rotation.y = playerData.rotation.y;
     tank.isSinkingBubbleShown = false;
+    
+    // NOWOŚĆ: Dodaj laser do obiektu nowego gracza
+    tank.laserSight = createPlayerLaser();
+
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
-    // Dodaj czołgi innych graczy do listy celów
     aimables.push(tank);
     displayJoinNotification(playerData.id);
 });
@@ -1000,11 +1033,13 @@ socket.on("playerDisconnected", (id) => {
     const bubble = document.getElementById(`bubble-${id}`);
     if(bubble) bubble.remove();
     if (gameObjects.players[id]) {
-        // Usuń czołg gracza z listy celów
         const index = aimables.indexOf(gameObjects.players[id]);
         if (index > -1) {
             aimables.splice(index, 1);
         }
+        // NOWOŚĆ: Usuń laser gracza ze sceny
+        scene.remove(gameObjects.players[id].laserSight);
+        
         scene.remove(gameObjects.players[id]);
         delete gameObjects.players[id];
         console.log(`Gracz ${id} się rozłączył.`);

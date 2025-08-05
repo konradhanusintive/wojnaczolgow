@@ -153,6 +153,11 @@ function handlePlayerAction(socket, action) {
             }
             break;
         case "dropMine": dropMine(socket.id); break;
+        case "toggleLaser":
+            if (player.laserData) {
+                player.laserData.enabled = !player.laserData.enabled;
+            }
+            break;
     }
 }
 function activatePowerUp(playerId, type) {
@@ -402,7 +407,7 @@ function checkPlayerBuildingCollision(player) {
             const brickAABB = {
                 minX: brickWorldPos.x - BRICK_SIZE.x / 2, maxX: brickWorldPos.x + BRICK_SIZE.x / 2,
                 minY: brickWorldPos.y - BRICK_SIZE.y / 2, maxY: brickWorldPos.y + BRICK_SIZE.y / 2,
-                minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z + BRICK_SIZE.z / 2,
+                minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z - BRICK_SIZE.z / 2,
             };
 
             if (player.position.x + playerRadius > brickAABB.minX && player.position.x - playerRadius < brickAABB.maxX &&
@@ -485,6 +490,11 @@ io.on("connection", (socket) => {
       isReloading: false, isDestroyed: false, respawnTimer: 0, keys: {},
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
       isSinking: false, sinkingTimer: 0, sinkingAngle: { x: 0, z: 0 },
+      laserData: { // NOWOŚĆ: Stan lasera dla gracza
+          enabled: true,
+          start: { x: 0, y: 0, z: 0 },
+          end: { x: 0, y: 0, z: 0 }
+      }
     };
     
     socket.emit("gameStarted", { 
@@ -503,6 +513,15 @@ io.on("connection", (socket) => {
       if(player) {
           player.turretRotation.y = aimData.turretY;
           player.mantletRotation.x = aimData.mantletX;
+      }
+  });
+
+  // NOWOŚĆ: Odbieranie i aktualizacja danych o laserze
+  socket.on("laserUpdate", (data) => {
+      const player = gameState.players[socket.id];
+      if (player && player.laserData) {
+          player.laserData.start = data.start;
+          player.laserData.end = data.end;
       }
   });
 
