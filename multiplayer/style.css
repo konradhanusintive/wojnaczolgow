@@ -4,8 +4,12 @@ body {
   background: #000;
   color: white;
   font-family: sans-serif;
-  cursor: none; /* Ukrywa domyślny kursor systemowy */
 }
+/* Kursor-celownik będzie aktywowany przez dodanie tej klasy do body */
+body.crosshair-cursor {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M16 5 V27 M5 16 H27" stroke="rgba(255, 50, 50, 0.9)" stroke-width="2"/><circle cx="16" cy="16" r="3" stroke="rgba(255, 50, 50, 0.9)" stroke-width="2" fill="none"/></svg>') 16 16, auto;
+}
+
 canvas {
   display: block;
 }
@@ -22,7 +26,6 @@ canvas {
   flex-direction: column;
   text-align: center;
   z-index: 50;
-  cursor: default; /* Pokazuje kursor na nakładkach */
 }
 #intro-screen {
   background-color: #000;
@@ -305,19 +308,4 @@ canvas {
     opacity: 0;
     transform: translateX(100%);
   }
-}
-
-/* Celownik - czerwona kropka */
-#crosshair {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: 10px;
-  height: 10px;
-  background-color: red;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.75);
-  box-shadow: 0 0 5px rgba(0,0,0,0.5);
-  z-index: 99;
-  pointer-events: none;
-  display: none;
 }

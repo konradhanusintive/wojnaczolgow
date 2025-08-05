@@ -13,15 +13,11 @@ let greySmokeMaterial, blackSmokeMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 
-// Zmienne do celowania z opóźnieniem
-let targetTurretWorldAngleY = 0; // Kąt w przestrzeni świata, do którego dąży wieża
-let currentTurretWorldAngleY = 0; // Aktualny, interpolowany kąt wieży w przestrzeni świata
-let targetMantletRotationX = 0;
-let clientMantletRotationX = 0;
-
-const raycaster = new THREE.Raycaster();
+// Zmienne dla celowania z raycastingiem
+let raycaster;
 const mouse = new THREE.Vector2();
-const aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const targetPoint = new THREE.Vector3();
+const aimables = []; // Obiekty, w które można celować (ziemia, budynki, etc.)
 
 const keys = {};
 let canFire = true;
@@ -37,7 +33,7 @@ const gameObjects = {
     projectiles: {},
     particles: [],
     wreckage: [],
-    smokeParticles: [],
+    smokeParticles: [], 
 };
 
 const socket = io();
@@ -72,12 +68,12 @@ function createMudTexture() {
     const canvas = document.createElement("canvas");
     canvas.width = 256; canvas.height = 256;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#5C4033";
+    ctx.fillStyle = "#5C4033"; // Ciemny brąz
     ctx.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 4000; i++) {
         const x = Math.random() * 256;
         const y = Math.random() * 256;
-        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)";
+        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)"; // Ciemniejsze i jaśniejsze plamy
         ctx.fillStyle = color;
         ctx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
     }
@@ -252,7 +248,7 @@ function emitSmokeParticle(tank, material) {
     particle.initialLifespan = particle.lifespan;
     particle.mesh.position.copy(smokePos);
     particle.mesh.scale.set(startSize, startSize, startSize);
-
+    
     gameObjects.smokeParticles.push(particle);
     scene.add(particle.mesh);
 }
@@ -291,16 +287,16 @@ function animateSelectionScreen() {
     selectionRenderers.forEach((item) => { item.tankMesh.rotation.y += 0.01; item.renderer.render(item.scene, item.camera); });
 }
 function updateHUD() {
-    const hudEl = document.getElementById('hud');
+    const hudEl = document.getElementById('hud'); 
     const minimapEl = document.getElementById('minimap-container');
-    if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId]) {
-        hudEl.style.display = 'none';
+    if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId]) { 
+        hudEl.style.display = 'none'; 
         minimapEl.style.display = 'none';
-        return;
+        return; 
     }
-    hudEl.style.display = 'block';
+    hudEl.style.display = 'block'; 
     minimapEl.style.display = 'block';
-
+    
     const playerState = clientGameState.players[localPlayerId]; const maxHealth = playerState.maxHealth;
     document.getElementById('hp-value').innerText = `${Math.max(0, playerState.health.toFixed(0))} / ${maxHealth}`; const hpPercent = (Math.max(0, playerState.health) / maxHealth) * 100;
     const hpBar = document.getElementById('hp-bar'); hpBar.style.width = `${hpPercent}%`; hpBar.className = `hud-bar-fill ${hpPercent < 30 ? "low" : ""}`;
@@ -343,7 +339,7 @@ function showCustomQuote(playerId, text) {
         bubble.id = `bubble-${playerId}`;
         document.getElementById('speech-bubbles-container').appendChild(bubble);
     }
-
+    
     bubble.innerText = text;
     bubble.style.display = "block";
 
@@ -373,7 +369,7 @@ function displayKillNotification(attackerId, victimId) {
         `🚀 ${attackerName} pokazał ${victimName}, gdzie raki zimują! 🦀`,
         `🎯 ${attackerName} trafia w dziesiątkę... a ${victimName} w pył! 💨`
     ];
-
+    
     const message = messages[Math.floor(Math.random() * messages.length)];
 
     const notificationElement = document.createElement('div');
@@ -384,7 +380,7 @@ function displayKillNotification(attackerId, victimId) {
 
     setTimeout(() => {
         notificationElement.remove();
-    }, 5000);
+    }, 5000); 
 }
 
 function displayJoinNotification(playerId) {
@@ -407,39 +403,31 @@ function displayJoinNotification(playerId) {
 // --- LOGIKA GRY (KLIENT) ---
 function initGame(payload) {
     localPlayerId = payload.playerId; clientGameState = payload.initialState; isGameStarted = true;
-
-    const localPlayerState = clientGameState.players[localPlayerId];
-    if (localPlayerState) {
-        // Ustaw początkowy kąt świata na podstawie stanu serwera
-        currentTurretWorldAngleY = localPlayerState.rotation.y + localPlayerState.turretRotation.y;
-        targetTurretWorldAngleY = currentTurretWorldAngleY;
-
-        clientMantletRotationX = localPlayerState.mantletRotation.x;
-        targetMantletRotationX = clientMantletRotationX;
-    }
-
     renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, 200, 450);
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
-
-    document.getElementById('crosshair').style.display = 'block';
+    
+    raycaster = new THREE.Raycaster();
+    document.body.classList.add('crosshair-cursor');
 
     minimapCanvas = document.getElementById('minimap');
     minimapCanvas.width = 220;
     minimapCanvas.height = 220;
     minimapCtx = minimapCanvas.getContext('2d');
-
+    
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() }));
     ground.rotation.x = -Math.PI / 2;
+    ground.name = 'ground'; // Nazwa do raycastingu
     scene.add(ground);
+    aimables.push(ground);
 
     const mudBorderWidth = 30;
     const mudGeometry = new THREE.PlaneGeometry(MAP_SIZE + mudBorderWidth, MAP_SIZE + mudBorderWidth);
     const mudMaterial = new THREE.MeshLambertMaterial({ map: createMudTexture() });
     const mud = new THREE.Mesh(mudGeometry, mudMaterial);
     mud.rotation.x = -Math.PI / 2;
-    mud.position.y = -0.1;
+    mud.position.y = -0.1; 
     scene.add(mud);
 
     const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
@@ -454,7 +442,7 @@ function initGame(payload) {
     water.rotation.x = -Math.PI / 2;
     water.position.y = -0.4;
     scene.add(water);
-
+    
     if (payload.spawnPoints) {
         for(const sp of payload.spawnPoints) {
             const marker = createSpawnMarker();
@@ -462,7 +450,7 @@ function initGame(payload) {
             scene.add(marker);
         }
     }
-
+    
     const smokeTexture = createSmokeTexture();
     greySmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x888888, depthWrite: false });
     blackSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x222222, depthWrite: false });
@@ -486,98 +474,53 @@ function handleFireInput() {
     } else if (playerState.activePowerUp === 'missile') {
         cooldownTime = 1.0;
     }
+    
+    // Oblicz wektor kierunku od lufy do punktu celowania
+    const localPlayerMesh = gameObjects.players[localPlayerId];
+    const barrelWorldPos = new THREE.Vector3();
+    localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
+    const direction = new THREE.Vector3().subVectors(targetPoint, barrelWorldPos).normalize();
 
-    socket.emit('playerAction', { type: 'fire' });
+    socket.emit('playerAction', { type: 'fire', direction: direction });
     canFire = false;
     fireCooldown = cooldownTime;
 }
+
 function setupEventListeners() {
-    document.addEventListener("keydown", (e) => {
-        keys[e.code] = true;
-        if (e.code === 'Space' || e.code === 'Enter') {
-            e.preventDefault();
-            handleFireInput();
-        }
-    });
-
-    document.addEventListener("mousedown", (e) => {
-        const menuEl = document.getElementById("menu");
-        if (!isGameStarted || (menuEl && menuEl.style.display === "flex")) return;
-        if (e.button === 0) { // Lewy przycisk myszy
-            keys['mouse0'] = true;
-            e.preventDefault();
-            handleFireInput();
-        }
-    });
-
-    document.addEventListener("mouseup", (e) => {
-        if (e.button === 0) {
-            keys['mouse0'] = false;
-        }
-    });
-
-    document.addEventListener("mousemove", (e) => {
-        if (!isGameStarted) return;
-        
-        const crosshair = document.getElementById('crosshair');
-        crosshair.style.left = e.clientX + 'px';
-        crosshair.style.top = e.clientY + 'px';
-        
-        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-    });
-
+    document.addEventListener("keydown", (e) => { keys[e.code] = true; });
     document.addEventListener("keyup", (e) => {
         keys[e.code] = false; if (!isGameStarted || !localPlayerId) return;
         if (e.code === 'KeyR') socket.emit('playerAction', { type: 'reload' });
         if (e.code === 'KeyB') socket.emit('playerAction', { type: 'heal' });
         if (e.code === 'KeyG') socket.emit('playerAction', { type: 'dropMine' });
     });
-
     const menuEl = document.getElementById("menu"), mapEl = document.getElementById("map-overlay"), scoreEl = document.getElementById("score-overlay");
     document.addEventListener("keydown", (e) => {
-        if (!isGameStarted) return;
-        if (e.code === "Escape") {
+        if (!isGameStarted) return; if (e.code === "Escape") {
             menuEl.style.display = menuEl.style.display === "flex" ? "none" : "flex";
         }
         if (e.code === "KeyM") mapEl.style.display = mapEl.style.display === "flex" ? "none" : "flex";
         if (e.code === "Tab") { e.preventDefault(); scoreEl.style.display = "flex"; updateScoreboard(); }
     });
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
+
+    // --- Nowe eventy dla myszy ---
+    document.addEventListener('mousemove', (e) => {
+        if (isGameStarted) {
+            // Normalizuj pozycję myszy do współrzędnych urządzenia (-1 do +1)
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (e.clientY / window.innerHeight) * 2 + 1;
+        }
+    });
+    document.addEventListener('mousedown', (e) => {
+        if(isGameStarted && e.button === 0) { // Tylko lewy przycisk
+             handleFireInput();
+        }
+    });
+    document.addEventListener('contextmenu', e => e.preventDefault());
 }
 
-function updateAim() {
-    if (!camera || !gameObjects.players[localPlayerId]) return;
-
-    const playerTank = gameObjects.players[localPlayerId];
-    
-    raycaster.setFromCamera(mouse, camera);
-    const intersectionPoint = new THREE.Vector3();
-    
-    if (raycaster.ray.intersectPlane(aimPlane, intersectionPoint)) {
-        const turretWorldPosition = new THREE.Vector3();
-        playerTank.turret.getWorldPosition(turretWorldPosition);
-        
-        const direction = intersectionPoint.clone().sub(turretWorldPosition);
-        
-        // Oblicz docelowy kąt wieży w przestrzeni świata
-        targetTurretWorldAngleY = Math.atan2(direction.x, direction.z);
-
-        const horizontalDistance = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
-        targetMantletRotationX = -Math.atan2(direction.y, horizontalDistance);
-        
-        const minMantletRot = -0.4;
-        const maxMantletRot = -0.02; 
-        targetMantletRotationX = Math.max(minMantletRot, Math.min(maxMantletRot, targetMantletRotationX));
-    }
-}
-
-function getContainerName(type) {
-    if (type === 'machineGunBullet') return 'machineGunBullets';
-    if (type.endsWith('y')) return type.slice(0, -1) + 'ies';
-    return type + 's';
-}
-
+// ... reszta funkcji (reconcile, createObjectMesh) bez zmian ...
 function reconcileGameState(serverState) {
     const serverPlayerIds = Object.keys(serverState.players || {});
     for (const id of serverPlayerIds) {
@@ -586,7 +529,7 @@ function reconcileGameState(serverState) {
             const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
             tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
             tank.isSinkingBubbleShown = false;
-            scene.add(tank);
+            scene.add(tank); 
             gameObjects.players[id] = tank;
         }
     }
@@ -605,19 +548,11 @@ function reconcileGameState(serverState) {
         }
     }
 }
-
 function createObjectMesh(payload) {
     const { type, data } = payload;
     let newMesh;
-    const containerName = getContainerName(type);
-    let container = gameObjects[containerName];
-
-    if(!container) {
-        console.error(`Nie znaleziono kontenera dla typu: ${type} (szukano: ${containerName})`);
-        return;
-    }
-    if(container[data.id]) return;
-
+    let container = gameObjects[type + 's'];
+    if(!container) return; if(container[data.id]) return;
     switch(type) {
         case 'projectile': newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 2 }) ); break;
         case 'machineGunBullet': newMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffa500 })); break;
@@ -625,9 +560,7 @@ function createObjectMesh(payload) {
             newMesh = new THREE.Group();
             const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 12), LAMBERT_MATERIAL(0xcccccc));
             const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 12), LAMBERT_MATERIAL(0xff0000));
-            tip.position.y = 1.5;
-            newMesh.add(body, tip);
-            break;
+            tip.position.y = 1.5; newMesh.add(body, tip); break;
         case 'mine': newMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16), LAMBERT_MATERIAL(0x444444)); break;
         case 'crate': newMesh = createSupplyCrate(); break;
     }
@@ -640,51 +573,52 @@ function createObjectMesh(payload) {
     }
 }
 
-const MINIMAP_VIEW_RADIUS = 250;
+const MINIMAP_VIEW_RADIUS = 250; 
 
 function drawMinimap() {
     if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || !minimapCtx) {
         return;
     }
-
+    
     const localPlayer = clientGameState.players[localPlayerId];
     if (localPlayer.isDestroyed || localPlayer.isSinking) {
         minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-        return;
+        return; 
     }
-
+    
     const ctx = minimapCtx;
     const canvas = minimapCanvas;
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
     const radius = canvas.width / 2;
     const scale = radius / MINIMAP_VIEW_RADIUS;
-
+    
     const playerRot = localPlayer.rotation.y;
     const cosR = Math.cos(playerRot);
     const sinR = Math.sin(playerRot);
-
+    
     const transformPoint = (x, z) => {
         const dx = x - localPlayer.position.x;
         const dz = z - localPlayer.position.z;
 
         if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) return null;
-
+        
         const rotatedX = dx * cosR + dz * sinR;
         const rotatedZ = -dx * sinR + dz * cosR;
-
+        
         return { x: centerX + rotatedX * scale, y: centerY - rotatedZ * scale };
     };
-
+    
+    // --- Rysowanie tła i siatki ---
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
     ctx.clip();
-
+    
     ctx.fillStyle = 'rgba(10, 25, 10, 0.75)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
+    
     ctx.strokeStyle = 'rgba(50, 255, 50, 0.2)';
     ctx.lineWidth = 1;
     [0.25, 0.5, 0.75].forEach(r => {
@@ -697,21 +631,29 @@ function drawMinimap() {
     ctx.moveTo(centerX, centerY - radius); ctx.lineTo(centerX, centerY + radius);
     ctx.stroke();
 
+    // --- Rysowanie obiektów ---
     const currentTime = Date.now();
 
+    // Budynki
     ctx.fillStyle = 'rgba(50, 200, 50, 0.25)';
     for (const id in gameObjects.buildings) {
         const buildingData = gameObjects.buildings[id]?.data;
         if (!buildingData) continue;
+
         const bPos = buildingData.position;
         const bDim = buildingData.dimensions;
         const halfW = bDim.x / 2;
         const halfD = bDim.z / 2;
+
         const corners = [
-            { x: bPos.x - halfW, z: bPos.z - halfD }, { x: bPos.x + halfW, z: bPos.z - halfD },
-            { x: bPos.x + halfW, z: bPos.z + halfD }, { x: bPos.x - halfW, z: bPos.z + halfD },
+            { x: bPos.x - halfW, z: bPos.z - halfD },
+            { x: bPos.x + halfW, z: bPos.z - halfD },
+            { x: bPos.x + halfW, z: bPos.z + halfD },
+            { x: bPos.x - halfW, z: bPos.z + halfD },
         ];
+
         const transformedCorners = corners.map(c => transformPoint(c.x, c.z));
+        
         if (transformedCorners.every(c => c !== null)) {
             ctx.beginPath();
             ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y);
@@ -722,7 +664,8 @@ function drawMinimap() {
             ctx.fill();
         }
     }
-
+    
+    // Skrzynki
     const crateBlink = Math.sin(currentTime * 0.005) * 0.4 + 0.6;
     ctx.fillStyle = `rgba(255, 223, 0, ${crateBlink})`;
     ctx.strokeStyle = `rgba(255, 223, 0, ${crateBlink + 0.2})`;
@@ -738,6 +681,7 @@ function drawMinimap() {
         }
     }
 
+    // Wrogowie
     ctx.fillStyle = '#ff1a1a';
     for (const id in clientGameState.players) {
         if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
@@ -750,6 +694,7 @@ function drawMinimap() {
         }
     }
 
+    // --- Linia skanująca ---
     const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
     sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)');
     sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)');
@@ -760,8 +705,9 @@ function drawMinimap() {
     ctx.closePath();
     ctx.fillStyle = sweepGradient;
     ctx.fill();
-    ctx.restore();
+    ctx.restore(); 
 
+    // --- Ikona gracza ---
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.fillStyle = '#66ff66';
@@ -775,6 +721,7 @@ function drawMinimap() {
     ctx.fill();
     ctx.restore();
 
+    // --- Ramka zewnętrzna ---
     ctx.strokeStyle = 'rgba(50, 255, 50, 0.8)';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -789,57 +736,31 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    updateAim();
-
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
-
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
-    if(keys['mouse0']) {
-        if(clientGameState.players[localPlayerId]?.activePowerUp === 'machinegun') { handleFireInput(); }
-    }
     
-    // **NOWA, POPRAWNA LOGIKA INTERPOLACJI KĄTA**
-    let diff = targetTurretWorldAngleY - currentTurretWorldAngleY;
-    while (diff < -Math.PI) diff += 2 * Math.PI;
-    while (diff > Math.PI) diff -= 2 * Math.PI;
-
-    const lerpFactor = delta * 5.0; 
-    currentTurretWorldAngleY += diff * lerpFactor;
-    clientMantletRotationX = THREE.MathUtils.lerp(clientMantletRotationX, targetMantletRotationX, lerpFactor);
-
+    // Aktualizacja stanu z klawiatury jest wysyłana do serwera
+    socket.emit("playerInput", keys);
 
     for (const id in clientGameState.players) {
         const serverTank = clientGameState.players[id];
         const clientTank = gameObjects.players[id];
         if (clientTank && serverTank) {
             clientTank.visible = !serverTank.isDestroyed;
-
+            
             clientTank.position.lerp(new THREE.Vector3(serverTank.position.x, serverTank.position.y, serverTank.position.z), 0.25);
-
+            
             const targetChassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.rotation.y, 0));
             const targetTiltQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverTank.sinkingAngle.x, 0, serverTank.sinkingAngle.z));
             const finalQuaternion = targetChassisQuaternion.multiply(targetTiltQuaternion);
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
-
-            if (id === localPlayerId) {
-                const clientTurretLocalAngleY = currentTurretWorldAngleY - serverTank.rotation.y;
-                clientTank.turret.rotation.y = clientTurretLocalAngleY;
-                clientTank.mantlet.rotation.y = 0; // Reset
-                clientTank.mantlet.rotation.x = clientMantletRotationX;
-
-                // Wysyłaj na serwer lokalny kąt wieży
-                socket.emit("playerInput", {
-                    keys,
-                    turretRotationY: clientTurretLocalAngleY,
-                    mantletRotationX: clientMantletRotationX
-                });
-
-            } else {
-                const targetTurretQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverTank.turretRotation.y, 0));
-                clientTank.turret.quaternion.slerp(targetTurretQuaternion, 0.15);
-                clientTank.mantlet.rotation.x = THREE.MathUtils.lerp(clientTank.mantlet.rotation.x, serverTank.mantletRotation.x, 0.15);
+            
+            // Tylko inni gracze mają wieżyczkę aktualizowaną z serwera, lokalny gracz ma natychmiastową
+            if (id !== localPlayerId) {
+                clientTank.turret.rotation.y = serverTank.turretRotation.y;
+                clientTank.mantlet.rotation.x = serverTank.mantletRotation.x;
             }
-
+            
             if (serverTank.isSinking && !clientTank.isSinkingBubbleShown) {
                 showCustomQuote(id, "Bul... bul... bul...");
                 clientTank.isSinkingBubbleShown = true;
@@ -862,7 +783,7 @@ function animate() {
             }
         }
     }
-
+    
     const projectileTypes = ['projectiles', 'machineGunBullets', 'missiles'];
     for(const type of projectileTypes) {
         const container = clientGameState[type];
@@ -883,7 +804,7 @@ function animate() {
     }
 
     for (const id in gameObjects.crates) { gameObjects.crates[id].rotation.y += 0.5 * delta; }
-
+    
     const gravity = -9.8;
     for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
         const p = gameObjects.particles[i];
@@ -891,7 +812,7 @@ function animate() {
         if (p.lifespan <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); gameObjects.particles.splice(i, 1);
         } else { p.velocity.y += gravity * delta; p.position.add(p.velocity.clone().multiplyScalar(delta)); }
     }
-
+    
     for (let i = gameObjects.smokeParticles.length - 1; i >= 0; i--) {
         const p = gameObjects.smokeParticles[i];
         p.lifespan -= delta;
@@ -934,23 +855,56 @@ function animate() {
         }
     }
 
+    // --- NOWA LOGIKA CELOWANIA I KAMERY ---
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
         const localPlayerState = clientGameState.players[localPlayerId];
 
+        // 1. Raycasting - znajdź punkt celowania
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(aimables, true);
+
+        if (intersects.length > 0) {
+            targetPoint.copy(intersects[0].point);
+        } else {
+            // Jeśli nie trafiono w nic, rzutuj na płaszczyznę na wysokości czołgu
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -localPlayerMesh.position.y);
+            raycaster.ray.intersectPlane(plane, targetPoint);
+        }
+
+        if (localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
+            // 2. Obróć wieżę i lufę w kierunku celu
+            const turret = localPlayerMesh.turret;
+            const mantlet = localPlayerMesh.mantlet;
+
+            // Przekształć punkt docelowy do lokalnych koordynatów wieży
+            const localTarget = turret.worldToLocal(targetPoint.clone());
+            
+            // Obrót wieży (oś Y)
+            const targetTurretAngle = Math.atan2(localTarget.x, localTarget.z);
+            turret.rotation.y = THREE.MathUtils.lerp(turret.rotation.y, targetTurretAngle, 0.15);
+
+            // Obrót lufy/mantletu (oś X)
+            const targetMantletAngle = Math.atan2(localTarget.y, Math.sqrt(localTarget.x**2 + localTarget.z**2));
+            mantlet.rotation.x = THREE.MathUtils.lerp(mantlet.rotation.x, Math.max(-0.5, Math.min(0.2, targetMantletAngle)), 0.15);
+            
+            // 3. Zaktualizuj stan i wyślij do serwera
+            localPlayerState.turretRotation.y = turret.rotation.y;
+            localPlayerState.mantletRotation.x = mantlet.rotation.x;
+            socket.emit('playerAimUpdate', { turretY: turret.rotation.y, mantletX: mantlet.rotation.x });
+        }
+        
+        // 4. Logika kamery
         if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
-            const dronePosition = new THREE.Vector3(
-                localPlayerMesh.position.x,
-                localPlayerMesh.position.y + 20,
-                localPlayerMesh.position.z + 5
-            );
+            const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
             camera.position.lerp(dronePosition, 0.05);
             camera.lookAt(localPlayerMesh.position);
         } else {
-            // **NOWA LOGIKA KAMERY**
-            const cameraRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, currentTurretWorldAngleY, 0));
+            camera.fov = 75;
+            camera.updateProjectionMatrix();
+
             const offset = new THREE.Vector3(0, 20, -30);
-            const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(cameraRotation));
+            const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
             camera.position.lerp(cameraTargetPosition, 0.1);
             camera.lookAt(localPlayerMesh.position.clone().add(new THREE.Vector3(0, 3, 0)));
         }
@@ -964,12 +918,21 @@ function animate() {
 // --- OBSŁUGA ZDARZEŃ Z SERWERA ---
 socket.on("connect", () => console.log("Połączono z serwerem!", socket.id));
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
-socket.on("gameStateUpdate", (serverState) => { clientGameState = serverState; });
+socket.on("gameStateUpdate", (serverState) => {
+    // Zachowaj lokalną, płynną pozycję wieżyczki dla gracza
+    if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
+        serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;
+        serverState.players[localPlayerId].mantletRotation = clientGameState.players[localPlayerId].mantletRotation;
+    }
+    clientGameState = serverState;
+});
 socket.on('objectCreated', (payload) => { createObjectMesh(payload); });
 
 socket.on('objectDestroyed', (payload) => {
     const { type, id, hit } = payload;
-    const containerName = getContainerName(type);
+    let containerName = type.endsWith('y') ? type.slice(0, -1) + 'ies' : type + 's';
+    if(type === 'machineGunBullet') containerName = 'machineGunBullets';
+
     const objectList = gameObjects[containerName];
     const object = objectList ? objectList[id] : null;
 
@@ -1006,13 +969,15 @@ socket.on("playerConnected", (playerData) => {
     if (!isGameStarted || !scene || gameObjects.players[playerData.id]) return;
     console.log(`Nowy gracz dołączył: ${playerData.id}`);
     if (clientGameState.players) { clientGameState.players[playerData.id] = playerData; }
-    const tankColor = 0xcc3333;
+    const tankColor = 0xcc3333; 
     const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
     tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
     tank.rotation.y = playerData.rotation.y;
     tank.isSinkingBubbleShown = false;
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
+    // Dodaj czołgi innych graczy do listy celów
+    aimables.push(tank);
     displayJoinNotification(playerData.id);
 });
 socket.on("playerDisconnected", (id) => {
@@ -1020,6 +985,11 @@ socket.on("playerDisconnected", (id) => {
     const bubble = document.getElementById(`bubble-${id}`);
     if(bubble) bubble.remove();
     if (gameObjects.players[id]) {
+        // Usuń czołg gracza z listy celów
+        const index = aimables.indexOf(gameObjects.players[id]);
+        if (index > -1) {
+            aimables.splice(index, 1);
+        }
         scene.remove(gameObjects.players[id]);
         delete gameObjects.players[id];
         console.log(`Gracz ${id} się rozłączył.`);
