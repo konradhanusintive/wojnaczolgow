@@ -878,16 +878,29 @@ function animate() {
             // 2. Obróć wieżę i lufę w kierunku celu
             const turret = localPlayerMesh.turret;
             const mantlet = localPlayerMesh.mantlet;
+            const chassis = turret.parent; // Kadłub jest rodzicem wieży
 
-            // Przekształć punkt docelowy do lokalnych koordynatów wieży
-            const localTarget = turret.worldToLocal(targetPoint.clone());
+            // Przekształć światowy punkt docelowy na lokalny względem KADŁUBA
+            const localTargetInChassis = chassis.worldToLocal(targetPoint.clone());
+
+            // Oblicz docelowy kąt obrotu wieży (oś Y) względem kadłuba
+            const targetTurretAngle = Math.atan2(localTargetInChassis.x, localTargetInChassis.z);
             
-            // Obrót wieży (oś Y)
-            const targetTurretAngle = Math.atan2(localTarget.x, localTarget.z);
-            turret.rotation.y = THREE.MathUtils.lerp(turret.rotation.y, targetTurretAngle, 0.15);
+            // Płynna interpolacja kąta, która zawsze wybiera najkrótszą drogę
+            let currentAngle = turret.rotation.y;
+            let diff = targetTurretAngle - currentAngle;
+            
+            // Zawijaj różnicę kąta, aby upewnić się, że jest w zakresie (-PI, PI)
+            while (diff < -Math.PI) diff += 2 * Math.PI;
+            while (diff > Math.PI) diff -= 2 * Math.PI;
 
-            // Obrót lufy/mantletu (oś X)
-            const targetMantletAngle = Math.atan2(localTarget.y, Math.sqrt(localTarget.x**2 + localTarget.z**2));
+            // Zastosuj część różnicy, aby uzyskać płynny ruch
+            turret.rotation.y += diff * 0.15;
+
+
+            // Obrót lufy/mantletu (oś X) jest obliczany względem wieży
+            const localTargetInTurret = turret.worldToLocal(targetPoint.clone());
+            const targetMantletAngle = Math.atan2(localTargetInTurret.y, Math.sqrt(localTargetInTurret.x**2 + localTargetInTurret.z**2));
             mantlet.rotation.x = THREE.MathUtils.lerp(mantlet.rotation.x, Math.max(-0.5, Math.min(0.2, targetMantletAngle)), 0.15);
             
             // 3. Zaktualizuj stan i wyślij do serwera
