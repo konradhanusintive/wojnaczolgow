@@ -475,13 +475,15 @@ function handleFireInput() {
         cooldownTime = 1.0;
     }
     
-    // Oblicz wektor kierunku od lufy do punktu celowania
     const localPlayerMesh = gameObjects.players[localPlayerId];
     const barrelWorldPos = new THREE.Vector3();
     localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
+
+    // Oblicz wektor kierunku od lufy do punktu celowania
     const direction = new THREE.Vector3().subVectors(targetPoint, barrelWorldPos).normalize();
 
-    socket.emit('playerAction', { type: 'fire', direction: direction });
+    // Wyślij pozycję startową lufy i kierunek
+    socket.emit('playerAction', { type: 'fire', direction: direction, startPosition: barrelWorldPos });
     canFire = false;
     fireCooldown = cooldownTime;
 }

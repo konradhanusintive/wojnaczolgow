@@ -69,14 +69,15 @@ function handleDamage(player, amount, attackerId) {
 }
 
 // --- Logika Strzelania ---
-function fireCannon(playerId, direction) {
+function fireCannon(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.isReloading || player.ammo <= 0) return;
     player.ammo--;
+    const { direction, startPosition } = action;
     const projectileId = `proj_${nextObjectId++}`;
     const projectile = {
         id: projectileId, ownerId: playerId, damage: TANKS_DATA[player.tankType].stats.damage,
-        position: { ...player.position }, // Pozycja startowa pocisku
+        position: startPosition, // Pozycja startowa pocisku z klienta
         direction: direction, // Użyj kierunku od klienta
         velocity: 160, lifespan: 3.0,
     };
@@ -84,25 +85,27 @@ function fireCannon(playerId, direction) {
     io.emit('objectCreated', { type: 'projectile', data: projectile });
     if (player.ammo <= 0) { handlePlayerAction({ id: playerId }, { type: 'reload' }); }
 }
-function fireMachineGun(playerId, direction) {
+function fireMachineGun(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.powerUpTimer <= 0) return;
+    const { direction, startPosition } = action;
     const bulletId = `bullet_${nextObjectId++}`;
     const bullet = {
-        id: bulletId, ownerId: playerId, damage: 3, position: { ...player.position },
+        id: bulletId, ownerId: playerId, damage: 3, position: startPosition,
         direction: direction, // Użyj kierunku od klienta
         velocity: 200, lifespan: 2.0,
     };
     gameState.machineGunBullets[bulletId] = bullet;
     io.emit('objectCreated', { type: 'machineGunBullet', data: bullet });
 }
-function fireMissile(playerId, direction) {
+function fireMissile(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.powerUpAmmo <= 0) return;
     player.powerUpAmmo--;
+    const { direction, startPosition } = action;
     const missileId = `missile_${nextObjectId++}`;
     const missile = {
-        id: missileId, ownerId: playerId, damage: TANKS_DATA[player.tankType].stats.damage * 2, position: { ...player.position },
+        id: missileId, ownerId: playerId, damage: TANKS_DATA[player.tankType].stats.damage * 2, position: startPosition,
         direction: direction, // Użyj kierunku od klienta
         lifespan: 10.0,
     };
@@ -130,10 +133,10 @@ function handlePlayerAction(socket, action) {
     if (!player || player.isDestroyed || player.isSinking) return;
     switch (action.type) {
         case "fire":
-            if (!player.activePowerUp) fireCannon(socket.id, action.direction);
-            else if (player.activePowerUp === 'machinegun') fireMachineGun(socket.id, action.direction);
-            else if (player.activePowerUp === 'missile') fireMissile(socket.id, action.direction);
-            else fireCannon(socket.id, action.direction);
+            if (!player.activePowerUp) fireCannon(socket.id, action);
+            else if (player.activePowerUp === 'machinegun') fireMachineGun(socket.id, action);
+            else if (player.activePowerUp === 'missile') fireMissile(socket.id, action);
+            else fireCannon(socket.id, action);
             break;
         case "reload":
             if (!player.isReloading && player.ammo < 8) {
@@ -399,7 +402,7 @@ function checkPlayerBuildingCollision(player) {
             const brickAABB = {
                 minX: brickWorldPos.x - BRICK_SIZE.x / 2, maxX: brickWorldPos.x + BRICK_SIZE.x / 2,
                 minY: brickWorldPos.y - BRICK_SIZE.y / 2, maxY: brickWorldPos.y + BRICK_SIZE.y / 2,
-                minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z - BRICK_SIZE.z / 2,
+                minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z + BRICK_SIZE.z / 2,
             };
 
             if (player.position.x + playerRadius > brickAABB.minX && player.position.x - playerRadius < brickAABB.maxX &&
