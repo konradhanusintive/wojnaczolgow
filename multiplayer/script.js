@@ -21,8 +21,8 @@ let terrainParams;
 // NOWOŚĆ: Zmienne dla śladów gąsienic
 let trackCanvas, trackCtx, trackTexture, trackMesh;
 const TRACK_CANVAS_RESOLUTION = 1024;
-const TRACK_LIFESPAN = 60; // Czas w sekundach, po którym ślady zaczną znikać (niezaimplementowane, ale to dobra praktyka)
-const MIN_TRACK_DISTANCE = 1.0; // Minimalna odległość, jaką czołg musi przejechać, by zostawić nowy ślad
+const TRACK_LIFESPAN = 60; 
+const MIN_TRACK_DISTANCE = 1.0;
 
 // Zmienne dla celowania z raycastingiem
 let raycaster;
@@ -108,7 +108,6 @@ function createTrackTexture() {
 }
 const trackMaterial = new THREE.MeshLambertMaterial({ map: createTrackTexture() });
 
-// NOWOŚĆ: Tekstura terenu rozróżniająca piasek i wzgórza
 function createGroundTexture(heightData, params) {
     const canvas = document.createElement("canvas");
     const size = 512;
@@ -629,34 +628,54 @@ function initGame(payload) {
     scene.add(terrainMesh);
     aimables.push(terrainMesh);
 
-    // NOWOŚĆ: Utworzenie płaszczyzny na ślady gąsienic
     trackCanvas = document.createElement('canvas');
     trackCanvas.width = TRACK_CANVAS_RESOLUTION;
     trackCanvas.height = TRACK_CANVAS_RESOLUTION;
     trackCtx = trackCanvas.getContext('2d');
-    trackCtx.fillStyle = 'rgba(0,0,0,0)'; // Wypełnienie przezroczystością
+    trackCtx.fillStyle = 'rgba(0,0,0,0)';
     trackCtx.fillRect(0, 0, trackCanvas.width, trackCanvas.height);
     
     trackTexture = new THREE.CanvasTexture(trackCanvas);
     const trackPlaneMaterial = new THREE.MeshBasicMaterial({
         map: trackTexture,
         transparent: true,
-        depthWrite: false, // Zapobiega problemom z przezroczystością
+        depthWrite: false,
     });
 
     trackMesh = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), trackPlaneMaterial);
     trackMesh.rotation.x = -Math.PI / 2;
-    trackMesh.position.y = 0.05; // Unosimy minimalnie nad terenem, aby uniknąć z-fightingu
+    trackMesh.position.y = 0.05;
     scene.add(trackMesh);
 
 
-    // NOWOŚĆ: Zmiana błota na obrzeże za pomocą RingGeometry
+    // --- POPRAWKA: Zmiana błota na kwadratową ramkę za pomocą THREE.Shape ---
     const shoreWidth = 30;
-    const mudGeometry = new THREE.RingGeometry(MAP_SIZE / 2, MAP_SIZE / 2 + shoreWidth, 128);
+    const outerRadius = MAP_SIZE / 2 + shoreWidth;
+    const innerRadius = MAP_SIZE / 2;
+    
+    const squareFrameShape = new THREE.Shape();
+    // Zewnętrzny kwadrat
+    squareFrameShape.moveTo(-outerRadius, -outerRadius);
+    squareFrameShape.lineTo( outerRadius, -outerRadius);
+    squareFrameShape.lineTo( outerRadius,  outerRadius);
+    squareFrameShape.lineTo(-outerRadius,  outerRadius);
+    squareFrameShape.lineTo(-outerRadius, -outerRadius);
+
+    // Wewnętrzny kwadrat (dziura)
+    const holePath = new THREE.Path();
+    holePath.moveTo(-innerRadius, -innerRadius);
+    holePath.lineTo( innerRadius, -innerRadius);
+    holePath.lineTo( innerRadius,  innerRadius);
+    holePath.lineTo(-innerRadius,  innerRadius);
+    holePath.lineTo(-innerRadius, -innerRadius);
+
+    squareFrameShape.holes.push(holePath);
+    
+    const mudGeometry = new THREE.ShapeGeometry(squareFrameShape);
     const mudMaterial = new THREE.MeshLambertMaterial({ map: createMudTexture() });
     const mud = new THREE.Mesh(mudGeometry, mudMaterial);
     mud.rotation.x = -Math.PI / 2;
-    mud.position.y = 0.01; // Lekko nad wodą, ale pod terenem
+    mud.position.y = 0.01; 
     scene.add(mud);
 
     const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
@@ -665,7 +684,7 @@ function initGame(payload) {
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    water.position.y = -0.5; // Poniżej błota
+    water.position.y = -0.5;
     scene.add(water);
     
     if (payload.spawnPoints) {
@@ -753,7 +772,6 @@ function reconcileGameState(serverState) {
             tank.isSinkingBubbleShown = false;
             tank.laserSight = createPlayerLaser();
             
-            // NOWOŚĆ: Inicjalizacja pozycji dla śladów
             tank.lastTrackPos = new THREE.Vector3(Infinity, Infinity, Infinity);
 
             scene.add(tank); 
@@ -947,40 +965,31 @@ function drawMinimap() {
     ctx.stroke();
 }
 
-
-// --- GŁÓWNA PĘTLA RENDEROWANIA ---
-// NOWOŚĆ: Funkcja do rysowania śladów na płótnie
 function drawTracks(tank) {
     const state = clientGameState.players[tank.id];
     if (!state) return;
 
-    // Pobierz dane czołgu i jego pozycję
     const tankData = TANKS_DATA[state.tankType];
     const trackWidth = tankData.hullWidth / 2 - 0.5;
     
-    // Oblicz wektory przesunięcia dla lewej i prawej gąsienicy
     const rightTrackOffset = new THREE.Vector3(trackWidth, 0, 0).applyQuaternion(tank.quaternion);
     const leftTrackOffset = new THREE.Vector3(-trackWidth, 0, 0).applyQuaternion(tank.quaternion);
     
-    // Pozycje gąsienic w świecie
     const rightTrackPos = tank.position.clone().add(rightTrackOffset);
     const leftTrackPos = tank.position.clone().add(leftTrackOffset);
 
-    // Rysuj obie gąsienice
     [leftTrackPos, rightTrackPos].forEach(trackPos => {
-        // Konwertuj pozycję świata na pozycję na płótnie
         const canvasX = (trackPos.x / MAP_SIZE + 0.5) * TRACK_CANVAS_RESOLUTION;
         const canvasY = (trackPos.z / MAP_SIZE + 0.5) * TRACK_CANVAS_RESOLUTION;
         
         trackCtx.save();
         trackCtx.translate(canvasX, canvasY);
-        trackCtx.rotate(-state.rotation.y); // Obróć ślad zgodnie z obrotem czołgu
+        trackCtx.rotate(-state.rotation.y);
         trackCtx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-        trackCtx.fillRect(-1.5, -3, 3, 6); // Rysuj prostokątny ślad
+        trackCtx.fillRect(-1.5, -3, 3, 6);
         trackCtx.restore();
     });
     
-    // Oznacz teksturę jako wymagającą aktualizacji
     trackTexture.needsUpdate = true;
 }
 
@@ -1010,7 +1019,6 @@ function animate() {
 
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
 
-            // NOWOŚĆ: Logika zostawiania śladów
             const dist = clientTank.position.distanceTo(clientTank.lastTrackPos);
             const distFromCenter = clientTank.position.length();
             if (dist > MIN_TRACK_DISTANCE && distFromCenter < terrainParams.sandyAreaRadius) {
@@ -1266,7 +1274,7 @@ socket.on("playerConnected", (playerData) => {
     tank.isSinkingBubbleShown = false;
     
     tank.laserSight = createPlayerLaser();
-    tank.lastTrackPos = new THREE.Vector3(Infinity, Infinity, Infinity); // NOWOŚĆ: Inicjalizacja dla nowego gracza
+    tank.lastTrackPos = new THREE.Vector3(Infinity, Infinity, Infinity);
 
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
