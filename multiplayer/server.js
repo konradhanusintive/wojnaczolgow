@@ -12,7 +12,6 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const MAP_SIZE = 500;
 const POWERUP_TYPES = ["turbo", "machinegun", "missile", "mines"];
-// POPRAWKA: Przywrócenie brakującej stałej
 const PLAYER_COLLISION_RADIUS = 7;
 
 // Parametry generacji terenu
@@ -385,7 +384,8 @@ function gameLoop() {
         const frontHeight = getHeightAt(frontX, frontZ);
         const backHeight = getHeightAt(backX, backZ);
         
-        const heightDifference = frontHeight - backHeight;
+        // --- POPRAWKA: Odwrócenie znaku w obliczeniu nachylenia ---
+        const heightDifference = backHeight - frontHeight; // Było: frontHeight - backHeight
         player.rotation.x = Math.atan2(heightDifference, TANK_LENGTH);
 
         const safeZone = MAP_SIZE / 2 + 15;
@@ -469,7 +469,6 @@ function gameLoop() {
             }
             if (destroyed) { delete projGroup.list[id]; io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true }); continue; }
 
-            // POPRAWKA: Kolizja pocisków z terenem
             const terrainHeight = getHeightAt(p.position.x, p.position.z);
             if (p.position.y <= terrainHeight) {
                 destroyed = true;
