@@ -1,3 +1,4 @@
+// ... (cały kod od początku bez zmian, aż do funkcji initGame)
 import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 
@@ -21,7 +22,7 @@ let terrainParams;
 // NOWOŚĆ: Zmienne dla śladów gąsienic
 let trackCanvas, trackCtx, trackTexture, trackMesh;
 const TRACK_CANVAS_RESOLUTION = 1024;
-const TRACK_LIFESPAN = 60; 
+const TRACK_LIFESPAN = 60;
 const MIN_TRACK_DISTANCE = 1.0;
 
 // Zmienne dla celowania z raycastingiem
@@ -55,7 +56,7 @@ const TANKS_DATA = {
   abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 35, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5 },
   standard: { name: "Standard", stats: { hp: 100, damage: 25, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5 },
 };
-const MAP_SIZE = 500;
+
 const TANK_QUOTES = [
   "Jedziesz, pociśnij go!", "Trafiony... ale nie zatopiony!", "Mam Cię na celowniku!",
   "Ktoś zamawiał pizzę z ołowiem?", "Auć, to bolało!", "Potrzebuję wsparcia! Albo kawy.",
@@ -130,20 +131,23 @@ function createGroundTexture(heightData, params) {
             
             const worldX = (u - 0.5) * params.size;
             const worldZ = (v - 0.5) * params.size;
-            const distFromCenter = Math.sqrt(worldX*worldX + worldZ*worldZ);
+            
+            const max_dist = Math.max(Math.abs(worldX), Math.abs(worldZ));
 
             const gridX = Math.floor(u * params.segments);
             const gridY = Math.floor(v * params.segments);
             
             const height = heightData[gridX][gridY];
-            const normalizedHeight = (height - minHeight) / (maxHeight - minHeight);
+            const normalizedHeight = (maxHeight - minHeight) > 0 ? (height - minHeight) / (maxHeight - minHeight) : 0;
 
             let color;
-            if (distFromCenter < params.sandyAreaRadius) {
-                 color = sandColor.clone();
+            if (max_dist > params.size / 2 - params.mudBorderWidth) {
+                color = dirtColor.clone(); // Strefa błota
+            } else if (max_dist < params.sandyAreaRadius) {
+                 color = sandColor.clone(); // Strefa piasku
                  const noise = PerlinNoise.noise(i * 0.2, j * 0.2) * 0.03;
                  color.offsetHSL(0, 0, noise);
-            } else {
+            } else { // Strefa wzgórz
                 color = grassColor.clone();
                 if (normalizedHeight > 0.5) {
                     color.lerp(dirtColor, (normalizedHeight - 0.5) * 2);
@@ -164,25 +168,7 @@ function createGroundTexture(heightData, params) {
     texture.wrapT = THREE.RepeatWrapping;
     return texture;
 }
-function createMudTexture() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 256; canvas.height = 256;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#5C4033";
-    ctx.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 4000; i++) {
-        const x = Math.random() * 256;
-        const y = Math.random() * 256;
-        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)";
-        ctx.fillStyle = color;
-        ctx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
-    }
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(16, 16);
-    return texture;
-}
+
 function createBrickMaterial() {
     const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#8a3d29"; ctx.fillRect(0, 0, 128, 128); ctx.strokeStyle = "#a15d4a"; ctx.lineWidth = 4;
@@ -433,15 +419,28 @@ function initializeUI() {
     });
     document.querySelectorAll(".select-button").forEach((button) => {
         button.addEventListener("click", (e) => {
-            if (button.disabled) return; const card = e.target.closest(".tank-card"); const tankType = card.id.split("-")[1];
+            if (button.disabled) return; 
+            const card = e.target.closest(".tank-card"); 
+            const tankType = card.id.split("-")[1];
             
+            const mapSize = document.querySelector('input[name="map-size"]:checked').value;
             const amplitude = parseInt(document.getElementById('terrain-amplitude').value, 10);
             const scale = parseInt(document.getElementById('terrain-scale').value, 10);
-            socket.emit("setTerrain", { amplitude, scale });
-
-            socket.emit("selectTank", tankType); 
-            document.getElementById("start-screen").style.display = "none"; isSelectionScreenActive = false;
-            selectionRenderers.forEach(({ renderer }) => renderer.dispose()); selectionRenderers = [];
+            
+            // NOWOŚĆ: Wysyłanie jednego eventu z całą konfiguracją
+            socket.emit("joinGame", {
+                tankType: tankType,
+                config: {
+                    mapSize: mapSize,
+                    amplitude: amplitude,
+                    scale: scale
+                }
+            }); 
+            
+            document.getElementById("start-screen").style.display = "none"; 
+            isSelectionScreenActive = false;
+            selectionRenderers.forEach(({ renderer }) => renderer.dispose()); 
+            selectionRenderers = [];
         });
     });
 
@@ -586,8 +585,8 @@ function initGame(payload) {
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
     
-    scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, 300, 550);
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
+    scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, terrainParams.size * 0.6, terrainParams.size * 1.1);
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000); clock = new THREE.Clock();
     
     scene.add(new THREE.AmbientLight(0xffffff, 0.8)); 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); 
@@ -642,43 +641,12 @@ function initGame(payload) {
         depthWrite: false,
     });
 
-    trackMesh = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), trackPlaneMaterial);
+    trackMesh = new THREE.Mesh(new THREE.PlaneGeometry(terrainParams.size, terrainParams.size), trackPlaneMaterial);
     trackMesh.rotation.x = -Math.PI / 2;
     trackMesh.position.y = 0.05;
     scene.add(trackMesh);
 
-
-    // --- POPRAWKA: Zmiana błota na kwadratową ramkę za pomocą THREE.Shape ---
-    const shoreWidth = 30;
-    const outerRadius = MAP_SIZE / 2 + shoreWidth;
-    const innerRadius = MAP_SIZE / 2;
-    
-    const squareFrameShape = new THREE.Shape();
-    // Zewnętrzny kwadrat
-    squareFrameShape.moveTo(-outerRadius, -outerRadius);
-    squareFrameShape.lineTo( outerRadius, -outerRadius);
-    squareFrameShape.lineTo( outerRadius,  outerRadius);
-    squareFrameShape.lineTo(-outerRadius,  outerRadius);
-    squareFrameShape.lineTo(-outerRadius, -outerRadius);
-
-    // Wewnętrzny kwadrat (dziura)
-    const holePath = new THREE.Path();
-    holePath.moveTo(-innerRadius, -innerRadius);
-    holePath.lineTo( innerRadius, -innerRadius);
-    holePath.lineTo( innerRadius,  innerRadius);
-    holePath.lineTo(-innerRadius,  innerRadius);
-    holePath.lineTo(-innerRadius, -innerRadius);
-
-    squareFrameShape.holes.push(holePath);
-    
-    const mudGeometry = new THREE.ShapeGeometry(squareFrameShape);
-    const mudMaterial = new THREE.MeshLambertMaterial({ map: createMudTexture() });
-    const mud = new THREE.Mesh(mudGeometry, mudMaterial);
-    mud.rotation.x = -Math.PI / 2;
-    mud.position.y = 0.01; 
-    scene.add(mud);
-
-    const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
+    const waterGeometry = new THREE.PlaneGeometry(terrainParams.size * 5, terrainParams.size * 5);
     const waterMaterial = new THREE.MeshStandardMaterial({
         color: 0x006994, metalness: 0.1, roughness: 0.2, transparent: true, opacity: 0.75,
     });
@@ -817,8 +785,6 @@ function createObjectMesh(payload) {
     }
 }
 
-const MINIMAP_VIEW_RADIUS = 250; 
-
 function drawMinimap() {
     if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || !minimapCtx) {
         return;
@@ -835,7 +801,7 @@ function drawMinimap() {
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
     const radius = canvas.width / 2;
-    const scale = radius / MINIMAP_VIEW_RADIUS;
+    const scale = radius / (terrainParams.size * 0.55); // Dopasuj skalę do rozmiaru mapy
     
     const playerRot = localPlayer.rotation.y;
     const cosR = Math.cos(playerRot);
@@ -844,8 +810,6 @@ function drawMinimap() {
     const transformPoint = (x, z) => {
         const dx = x - localPlayer.position.x;
         const dz = z - localPlayer.position.z;
-
-        if (dx * dx + dz * dz > MINIMAP_VIEW_RADIUS * MINIMAP_VIEW_RADIUS) return null;
         
         const rotatedX = dx * cosR + dz * sinR;
         const rotatedZ = -dx * sinR + dz * cosR;
@@ -979,8 +943,8 @@ function drawTracks(tank) {
     const leftTrackPos = tank.position.clone().add(leftTrackOffset);
 
     [leftTrackPos, rightTrackPos].forEach(trackPos => {
-        const canvasX = (trackPos.x / MAP_SIZE + 0.5) * TRACK_CANVAS_RESOLUTION;
-        const canvasY = (trackPos.z / MAP_SIZE + 0.5) * TRACK_CANVAS_RESOLUTION;
+        const canvasX = (trackPos.x / terrainParams.size + 0.5) * TRACK_CANVAS_RESOLUTION;
+        const canvasY = (trackPos.z / terrainParams.size + 0.5) * TRACK_CANVAS_RESOLUTION;
         
         trackCtx.save();
         trackCtx.translate(canvasX, canvasY);
@@ -1019,9 +983,10 @@ function animate() {
 
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
 
+            const max_dist = Math.max(Math.abs(clientTank.position.x), Math.abs(clientTank.position.z));
             const dist = clientTank.position.distanceTo(clientTank.lastTrackPos);
-            const distFromCenter = clientTank.position.length();
-            if (dist > MIN_TRACK_DISTANCE && distFromCenter < terrainParams.sandyAreaRadius) {
+            
+            if (dist > MIN_TRACK_DISTANCE && max_dist < terrainParams.sandyAreaRadius) {
                 drawTracks(clientTank);
                 clientTank.lastTrackPos.copy(clientTank.position);
             }
@@ -1215,8 +1180,39 @@ function animate() {
 }
 
 // --- OBSŁUGA ZDARZEŃ Z SERWERA ---
-socket.on("connect", () => console.log("Połączono z serwerem!", socket.id));
-socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
+socket.on("connect", () => {
+    console.log("Połączono z serwerem!", socket.id);
+});
+
+// NOWOŚĆ: Obsługa statusu serwera
+socket.on('serverStatus', (data) => {
+    if(data.configured) {
+        console.log("Serwer już skonfigurowany. Blokowanie opcji.");
+        const configPanel = document.getElementById('server-config-panel');
+        configPanel.disabled = true;
+
+        // Aktualizacja UI do wartości serwera
+        document.querySelector(`input[name="map-size"][value="${data.settings.mapSize}"]`).checked = true;
+        
+        const ampSlider = document.getElementById('terrain-amplitude');
+        const ampValue = document.getElementById('amplitude-value');
+        ampSlider.value = data.settings.amplitude;
+        ampValue.textContent = data.settings.amplitude;
+
+        const scaleSlider = document.getElementById('terrain-scale');
+        const scaleValue = document.getElementById('scale-value');
+        scaleSlider.value = data.settings.scale;
+        scaleValue.textContent = data.settings.scale;
+    } else {
+        console.log("Serwer oczekuje na konfigurację.");
+    }
+});
+
+socket.on("gameStarted", (payload) => { 
+    console.log("Gra rozpoczęta! Twój ID:", payload.playerId); 
+    initGame(payload); 
+});
+
 socket.on("gameStateUpdate", (serverState) => {
     if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
         serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;

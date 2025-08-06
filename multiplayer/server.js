@@ -10,27 +10,37 @@ const io = new Server(server);
 
 // --- Konfiguracja i stałe gry ---
 const PORT = process.env.PORT || 3000;
-const MAP_SIZE = 500;
 const POWERUP_TYPES = ["turbo", "machinegun", "missile", "mines"];
 const PLAYER_COLLISION_RADIUS = 7;
 
-// Parametry generacji terenu
-const TERRAIN_SEGMENTS = 100;
+// NOWOŚĆ: Domyślne/startowe wartości, które mogą być zmienione przez pierwszego gracza
+let MAP_SIZE = 500; 
 let TERRAIN_AMPLITUDE = 20;
 let TERRAIN_SCALE = 120;
+let isGameConfigured = false; // Flaga określająca, czy serwer został już skonfigurowany
+
+const MAP_SIZES = {
+    S: 300,
+    M: 500,
+    L: 700,
+    XL: 900,
+    XXL: 1200
+};
+
+const TERRAIN_SEGMENTS = 100;
 let heightMap = [];
 const SANDY_AREA_RADIUS = 150; 
 const HILL_TRANSITION_WIDTH = 50;
+const MUD_BORDER_WIDTH = 30;
 
 const SPAWN_POINTS = [
-    { x: 200, z: 0 },   { x: -200, z: 0 },
-    { x: 0, z: 200 },   { x: 0, z: -200 },
-    { x: 141, z: 141 }, { x: -141, z: -141 },
-    { x: 141, z: -141 },{ x: -141, z: 141 }
+    { x: 0.4, z: 0 },   { x: -0.4, z: 0 },
+    { x: 0, z: 0.4 },   { x: 0, z: -0.4 },
+    { x: 0.28, z: 0.28 }, { x: -0.28, z: -0.28 },
+    { x: 0.28, z: -0.28 },{ x: -0.28, z: 0.28 }
 ];
 const SPAWN_CLEARANCE_RADIUS = 35; 
 
-// --- Stałe generacji miasta ---
 const CITY_GRID_SIZE = 20;
 const CITY_CELL_SIZE = 30;
 const BUILDING_PROBABILITY = 0.5;
@@ -58,6 +68,8 @@ const gameState = {
 
 let nextObjectId = 0;
 let crateSpawnTimer = 10.0;
+
+// ... (reszta kodu bez zmian, aż do gameLoop)
 
 // --- Implementacja szumu Perlina ---
 const PerlinNoise = new (function() {
@@ -99,15 +111,18 @@ const PerlinNoise = new (function() {
 // --- Funkcje do obsługi terenu ---
 function generateHeightMap() {
     PerlinNoise.init(Math.random());
-    console.log(`Generowanie mapy wysokości z amplitudą: ${TERRAIN_AMPLITUDE}, skalą: ${TERRAIN_SCALE}`);
+    console.log(`Generowanie mapy (${MAP_SIZE}x${MAP_SIZE}) z amplitudą: ${TERRAIN_AMPLITUDE}, skalą: ${TERRAIN_SCALE}`);
     heightMap = new Array(TERRAIN_SEGMENTS + 1);
     for (let i = 0; i <= TERRAIN_SEGMENTS; i++) {
         heightMap[i] = new Array(TERRAIN_SEGMENTS + 1);
         for (let j = 0; j <= TERRAIN_SEGMENTS; j++) {
             const x = (i / TERRAIN_SEGMENTS - 0.5) * MAP_SIZE;
             const z = (j / TERRAIN_SEGMENTS - 0.5) * MAP_SIZE;
-            const distance_from_center = Math.sqrt(x * x + z * z);
             
+            const dist_x = Math.abs(x);
+            const dist_z = Math.abs(z);
+            const max_dist = Math.max(dist_x, dist_z);
+
             const nx = i / TERRAIN_SEGMENTS;
             const ny = j / TERRAIN_SEGMENTS;
 
@@ -117,11 +132,11 @@ function generateHeightMap() {
                              + 0.25 * PerlinNoise.noise(nx * TERRAIN_SCALE / 25, ny * TERRAIN_SCALE / 25);
             const normalized_hill_height = hill_noise / (1 + 0.5 + 0.25) * TERRAIN_AMPLITUDE;
 
-            if (distance_from_center < SANDY_AREA_RADIUS) {
+            if (max_dist < SANDY_AREA_RADIUS) {
                 height = 0;
-            } else if (distance_from_center < SANDY_AREA_RADIUS + HILL_TRANSITION_WIDTH) {
-                const transition_factor = (distance_from_center - SANDY_AREA_RADIUS) / HILL_TRANSITION_WIDTH;
-                const eased_factor = transition_factor * transition_factor * (3 - 2 * transition_factor); // Smoothstep
+            } else if (max_dist < SANDY_AREA_RADIUS + HILL_TRANSITION_WIDTH) {
+                const transition_factor = (max_dist - SANDY_AREA_RADIUS) / HILL_TRANSITION_WIDTH;
+                const eased_factor = transition_factor * transition_factor * (3 - 2 * transition_factor);
                 height = lerp(0, normalized_hill_height, eased_factor);
             } else {
                 height = normalized_hill_height;
@@ -318,7 +333,7 @@ function gameLoop() {
                 player.ammo = 8; 
                 player.isDestroyed = false;
                 const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
-                player.position = { x: spawnPoint.x, y: 0, z: spawnPoint.z };
+                player.position = { x: spawnPoint.x * (MAP_SIZE/2), y: 0, z: spawnPoint.z * (MAP_SIZE/2) };
                 player.position.y = getHeightAt(player.position.x, player.position.z) + tankData.startY;
                 player.rotation.x = 0;
             }
@@ -384,12 +399,11 @@ function gameLoop() {
         const frontHeight = getHeightAt(frontX, frontZ);
         const backHeight = getHeightAt(backX, backZ);
         
-        // --- POPRAWKA: Odwrócenie znaku w obliczeniu nachylenia ---
-        const heightDifference = backHeight - frontHeight; // Było: frontHeight - backHeight
+        const heightDifference = backHeight - frontHeight;
         player.rotation.x = Math.atan2(heightDifference, TANK_LENGTH);
 
-        const safeZone = MAP_SIZE / 2 + 15;
-        if (Math.abs(player.position.x) > safeZone || Math.abs(player.position.z) > safeZone) {
+        const safeZone = MAP_SIZE / 2;
+        if (Math.abs(player.position.x) > safeZone + TANK_LENGTH / 2 || Math.abs(player.position.z) > safeZone + TANK_LENGTH / 2) {
             if (!player.isSinking) {
                  player.isSinking = true;
                  player.sinkingTimer = 2.0;
@@ -526,7 +540,7 @@ function gameLoop() {
                 isSafe = true;
                 cratePos = { x: (Math.random() - 0.5) * (MAP_SIZE - 40), y: 0, z: (Math.random() - 0.5) * (MAP_SIZE - 40) };
                 for(const sp of SPAWN_POINTS) {
-                    const dist = Math.sqrt((cratePos.x - sp.x)**2 + (cratePos.z - sp.z)**2);
+                    const dist = Math.sqrt((cratePos.x - sp.x * (MAP_SIZE/2))**2 + (cratePos.z - sp.z * (MAP_SIZE/2))**2);
                     if (dist < SPAWN_CLEARANCE_RADIUS) {
                         isSafe = false;
                         break;
@@ -615,7 +629,7 @@ function createProceduralCity() {
 
                 let isTooCloseToSpawn = false;
                 for(const sp of SPAWN_POINTS) {
-                    const distance = Math.sqrt((position.x - sp.x)**2 + (position.z - sp.z)**2);
+                    const distance = Math.sqrt((position.x - sp.x * (MAP_SIZE/2))**2 + (position.z - sp.z * (MAP_SIZE/2))**2);
                     if (distance < SPAWN_CLEARANCE_RADIUS + CITY_CELL_SIZE / 2) {
                         isTooCloseToSpawn = true;
                         break;
@@ -653,21 +667,53 @@ function createProceduralCity() {
 io.on("connection", (socket) => {
   console.log(`Gracz połączony: ${socket.id}`);
 
-  socket.on("setTerrain", (params) => {
-      if(Object.keys(gameState.players).length === 0) {
-          TERRAIN_AMPLITUDE = params.amplitude;
-          TERRAIN_SCALE = params.scale;
-          generateHeightMap();
-          createProceduralCity();
-      }
-  });
+  // NOWOŚĆ: Logika sprawdzania statusu serwera
+  if (isGameConfigured) {
+      socket.emit('serverStatus', { 
+          configured: true, 
+          settings: { 
+              mapSize: Object.keys(MAP_SIZES).find(key => MAP_SIZES[key] === MAP_SIZE),
+              amplitude: TERRAIN_AMPLITUDE, 
+              scale: TERRAIN_SCALE 
+          } 
+      });
+  } else {
+      socket.emit('serverStatus', { configured: false });
+  }
 
-  socket.on("selectTank", (tankType) => {
-    if (gameState.players[socket.id] || !TANKS_DATA[tankType]) return;
+  // NOWOŚĆ: Ujednolicony event dołączania do gry
+  socket.on("joinGame", (data) => {
+    if (gameState.players[socket.id]) return; // Gracz już w grze
+
+    // Jeśli gra nie jest skonfigurowana, ten gracz ją konfiguruje
+    if (!isGameConfigured) {
+        isGameConfigured = true;
+        MAP_SIZE = MAP_SIZES[data.config.mapSize] || 500;
+        TERRAIN_AMPLITUDE = data.config.amplitude;
+        TERRAIN_SCALE = data.config.scale;
+        
+        console.log("Serwer skonfigurowany przez pierwszego gracza:", data.config);
+        
+        generateHeightMap();
+        createProceduralCity();
+
+        // Poinformuj innych (przyszłych) graczy, że ustawienia są zablokowane
+        socket.broadcast.emit('serverStatus', { 
+            configured: true, 
+            settings: { 
+                mapSize: data.config.mapSize,
+                amplitude: TERRAIN_AMPLITUDE, 
+                scale: TERRAIN_SCALE
+            } 
+        });
+    }
+
+    const tankType = data.tankType;
+    if (!TANKS_DATA[tankType]) return;
+
     const tankData = TANKS_DATA[tankType];
-
-    const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
-    const startPos = { x: spawnPoint.x, y: 0, z: spawnPoint.z };
+    const spawnPoint = SPAWN_POINTS[Object.keys(gameState.players).length % SPAWN_POINTS.length];
+    const startPos = { x: spawnPoint.x * (MAP_SIZE / 2), y: 0, z: spawnPoint.z * (MAP_SIZE / 2) };
     startPos.y = getHeightAt(startPos.x, startPos.z) + tankData.startY;
 
     gameState.players[socket.id] = {
@@ -686,19 +732,21 @@ io.on("connection", (socket) => {
     socket.emit("gameStarted", { 
         playerId: socket.id, 
         initialState: gameState,
-        spawnPoints: SPAWN_POINTS,
+        spawnPoints: SPAWN_POINTS.map(p => ({ x: p.x * MAP_SIZE / 2, z: p.z * MAP_SIZE / 2 })),
         heightMap: heightMap,
         terrainParams: {
             size: MAP_SIZE,
             segments: TERRAIN_SEGMENTS,
             amplitude: TERRAIN_AMPLITUDE,
-            sandyAreaRadius: SANDY_AREA_RADIUS
+            sandyAreaRadius: SANDY_AREA_RADIUS,
+            mudBorderWidth: MUD_BORDER_WIDTH,
         }
     });
     
     socket.broadcast.emit("playerConnected", gameState.players[socket.id]);
     console.log(`Gracz ${socket.id} wybrał czołg ${tankType}.`);
   });
+
   socket.on("playerInput", (keys) => { if (gameState.players[socket.id]) { gameState.players[socket.id].keys = keys; } });
   
   socket.on("playerAimUpdate", (aimData) => {
@@ -730,7 +778,6 @@ app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
 server.listen(PORT, () => {
   console.log(`Serwer nasłuchuje na porcie ${PORT}`);
-  generateHeightMap(); 
-  createProceduralCity();
+  // Usunięto generowanie świata na starcie serwera. Teraz jest generowany przez pierwszego gracza.
   setInterval(gameLoop, 1000 / 30);
 });

@@ -23,7 +23,7 @@
             <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-pl01-spd" class="stat-bar-fill"></div></div></div>
             <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-pl01-rot" class="stat-bar-fill"></div></div></div>
           </div>
-          <button class="select-button">Wybierz</button>
+          <button class="select-button">Wybierz i Walcz</button>
         </div>
         <div class="tank-card locked" id="select-abrams">
           <div class="premium-label">PREMIUM</div>
@@ -46,23 +46,37 @@
             <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-standard-spd" class="stat-bar-fill"></div></div></div>
             <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-standard-rot" class="stat-bar-fill"></div></div></div>
           </div>
-          <button class="select-button">Wybierz</button>
+          <button class="select-button">Wybierz i Walcz</button>
         </div>
       </div>
-       <!-- NOWOŚĆ: Panel do kontroli terenu -->
-       <div id="terrain-controls">
-        <h2 id="terrain-title">Dostosuj Teren</h2>
-        <div class="control-row">
-            <label for="terrain-amplitude">Wysokość Wzgórz:</label>
-            <input type="range" id="terrain-amplitude" min="5" max="50" value="20">
-            <span id="amplitude-value">20</span>
+       <!-- NOWOŚĆ: Panel do konfiguracji serwera -->
+       <fieldset id="server-config-panel">
+        <div id="terrain-controls">
+          <h2 id="terrain-title">Ustawienia Serwera (Tylko Pierwszy Gracz)</h2>
+          
+          <div id="map-size-selector">
+              <h3>Rozmiar Mapy</h3>
+              <div class="size-options">
+                  <input type="radio" id="size-s" name="map-size" value="S"><label for="size-s">S</label>
+                  <input type="radio" id="size-m" name="map-size" value="M" checked><label for="size-m">M</label>
+                  <input type="radio" id="size-l" name="map-size" value="L"><label for="size-l">L</label>
+                  <input type="radio" id="size-xl" name="map-size" value="XL"><label for="size-xl">XL</label>
+                  <input type="radio" id="size-xxl" name="map-size" value="XXL"><label for="size-xxl">XXL</label>
+              </div>
+          </div>
+
+          <div class="control-row">
+              <label for="terrain-amplitude">Wysokość Wzgórz:</label>
+              <input type="range" id="terrain-amplitude" min="5" max="50" value="20">
+              <span id="amplitude-value">20</span>
+          </div>
+          <div class="control-row">
+              <label for="terrain-scale">Gęstość Wzgórz:</label>
+              <input type="range" id="terrain-scale" min="50" max="200" value="120">
+              <span id="scale-value">120</span>
+          </div>
         </div>
-        <div class="control-row">
-            <label for="terrain-scale">Gęstość Wzgórz:</label>
-            <input type="range" id="terrain-scale" min="50" max="200" value="120">
-            <span id="scale-value">120</span>
-        </div>
-      </div>
+       </fieldset>
     </div>
 
     <!-- UI Gry -->
@@ -84,10 +98,7 @@
     </div>
 
     <div id="respawn-message" class="respawn-message" style="display: none"></div>
-    <!-- Kontener na dymki mowy, pozycjonowane absolutnie -->
     <div id="speech-bubbles-container"></div>
-    
-    <!-- Kontener na powiadomienia (zniszczenia, dołączenia) -->
     <div id="kill-feed-container"></div>
 
     <!-- Nakładki Menu, Mapy i Wyników -->

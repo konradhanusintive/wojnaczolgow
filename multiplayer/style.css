@@ -5,7 +5,6 @@ body {
   color: white;
   font-family: sans-serif;
 }
-/* Kursor-celownik będzie aktywowany przez dodanie tej klasy do body */
 body.crosshair-cursor {
   cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M16 5 V27 M5 16 H27" stroke="rgba(255, 50, 50, 0.9)" stroke-width="2"/><circle cx="16" cy="16" r="3" stroke="rgba(255, 50, 50, 0.9)" stroke-width="2" fill="none"/></svg>') 16 16, auto;
 }
@@ -142,7 +141,19 @@ canvas {
   cursor: not-allowed;
 }
 
-/* NOWOŚĆ: Style dla panelu kontroli terenu */
+/* NOWOŚĆ: Style dla panelu konfiguracji serwera */
+#server-config-panel {
+    border: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+#server-config-panel:disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
 #terrain-controls {
     margin-top: 40px;
     background-color: rgba(20, 20, 20, 0.7);
@@ -150,13 +161,44 @@ canvas {
     border-radius: 10px;
     border: 2px solid #555;
     width: 90%;
-    max-width: 600px;
+    max-width: 800px;
     color: #ffc107;
 }
-#terrain-title {
+#terrain-title, #map-size-selector h3 {
     margin-top: 0;
     font-size: 1.8em;
     text-shadow: 2px 2px 4px #000;
+}
+#map-size-selector h3 {
+    margin-bottom: 10px;
+}
+.size-options {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 25px;
+}
+.size-options input[type="radio"] {
+    display: none;
+}
+.size-options label {
+    padding: 10px 20px;
+    border: 2px solid #555;
+    background-color: #222;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+.size-options input[type="radio"]:checked + label {
+    background-color: #ffc107;
+    color: #000;
+    border-color: #ffc107;
+    transform: scale(1.05);
+}
+.size-options label:hover {
+    border-color: #ffc107;
 }
 .control-row {
     display: flex;
@@ -196,8 +238,6 @@ canvas {
     font-weight: bold;
 }
 
-
-/* Zmodyfikowany pojedynczy HUD */
 .hud {
   position: absolute;
   bottom: 20px;
@@ -242,7 +282,6 @@ canvas {
   background: #dc3545;
 }
 
-/* Kontener minimapy */
 #minimap-container {
   position: absolute;
   bottom: 20px;
@@ -289,7 +328,7 @@ canvas {
   transform: translate(-50%, -120%);
   z-index: 30;
   border: 2px solid #333;
-  display: none; /* Ukryte domyślnie, zarządzane przez JS */
+  display: none;
 }
 .speech-bubble::after {
   content: "";
@@ -302,7 +341,6 @@ canvas {
   border-color: rgba(255, 255, 255, 0.9) transparent transparent transparent;
 }
 
-/* Kontener na powiadomienia */
 #kill-feed-container {
   position: absolute;
   top: 20px;
@@ -312,10 +350,9 @@ canvas {
   flex-direction: column;
   align-items: flex-end;
   gap: 10px;
-  pointer-events: none; /* Ignoruje kliknięcia myszką */
+  pointer-events: none;
 }
 
-/* Styl pojedynczego powiadomienia o zniszczeniu */
 .kill-notification {
   background-color: rgba(20, 20, 20, 0.8);
   border: 1px solid #ff4500;
@@ -330,7 +367,6 @@ canvas {
   white-space: nowrap;
 }
 
-/* Styl pojedynczego powiadomienia o dołączeniu */
 .join-notification {
   background-color: rgba(74, 144, 226, 0.8);
   border: 1px solid #4a90e2;
@@ -345,7 +381,6 @@ canvas {
   white-space: nowrap;
 }
 
-/* Animacja dla powiadomień */
 @keyframes slideInAndFadeOut {
   0% {
     opacity: 0;
