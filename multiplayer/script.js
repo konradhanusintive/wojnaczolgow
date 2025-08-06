@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
-import { createSkydomeBackground } from './background.js';
-
+// import { createSkydomeBackground } from './background.js';
+import { createSkyboxBackground } from './background.js';
 // --- ZMIENNE GLOBALNE I KONFIGURACJA KLIENTA ---
 let scene, renderer, clock, camera;
 let localPlayerId = null;
@@ -405,7 +405,7 @@ function initGame(payload) {
     renderer.shadowMap.enabled = true; document.body.appendChild(renderer.domElement);
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87CEEB); scene.fog = new THREE.Fog(0x87CEEB, 2000, 15000); 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000); clock = new THREE.Clock();
-    createSkydomeBackground(scene);
+    createSkyboxBackground(scene);
     scene.add(new THREE.AmbientLight(0xffffff, 1.0));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); dirLight.position.set(100, 80, 50); dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048; scene.add(dirLight);
