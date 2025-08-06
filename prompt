@@ -1,0 +1,23 @@
+Pamietaj aby za każdym razem gdy edytujesz jakiś plik aby generować go w całości tak aby z łatwością można było go skopiować i wkleić do edytora.
+Rola: Jesteś ekspertem w dziedzinie programowania gier w JavaScript, specjalizującym się w grafice 2D/3D i fizyce.
+Kontekst: Tworzę grę o czołgach w stylu "World of Tanks", używając HTML, CSS i JavaScript, z serwerem opartym na Node.js. Obecnie moja mapa to płaska wyspa, a czołg porusza się po płaskiej powierzchni. Chcę wprowadzić pagórkowaty teren.
+Cel główny: Zmodyfikuj mój kod, aby przekształcić płaską mapę w teren z łagodnymi wzniesieniami i pagórkami. Zaimplementuj mechanikę, dzięki której czołg będzie realistycznie przylegał do podłoża i dynamicznie zmieniał swoje nachylenie w zależności od rzeźby terenu.
+
+ Zmodyfikuj mój kod, aby przekształcić płaską mapę w teren z łagodnymi wzniesieniami i pagórkami. Zaimplementuj mechanikę, dzięki której czołg będzie realistycznie przylegał do podłoża i dynamicznie zmieniał swoje nachylenie w zależności od rzeźby terenu.
+Szczegółowe wymagania:
+Generowanie Terenu:
+Wygeneruj mapę wysokości (heightmap) dla terenu przy użyciu funkcji szumu, takiej jak szum Perlina (Perlin noise). Pozwoli to na stworzenie naturalnie wyglądających, łagodnych wzniesień.
+Dodaj parametry, które będę mógł łatwo modyfikować, takie jak amplituda (wysokość wzgórz) i skala (gęstość wzgórz), aby kontrolować wygląd terenu.
+Wizualizuj teren na elemencie <canvas> w HTML.
+Fizyka i Pozycja Czołgu:
+Przyleganie do podłoża: Wysokość czołgu (pozycja na osi Y) musi być na bieżąco aktualizowana na podstawie wysokości terenu bezpośrednio pod jego środkiem. Zaimplementuj funkcję getHeightAt(x, z), która zwraca wysokość terenu w danym punkcie.
+Nachylenie czołgu: Kąt nachylenia czołgu (pitch) musi dynamicznie dopasowywać się do podłoża. Aby to osiągnąć:
+Pobierz wysokość terenu w dwóch punktach: pod przodem i pod tyłem czołgu.
+Na podstawie różnicy wysokości między tymi dwoma punktami oblicz kąt nachylenia, używając funkcji atan2.
+Zastosuj obliczony kąt do modelu czołgu, aby wizualnie go przechylić.
+Implementacja w Kodzie:
+Zintegruj nową logikę z pętlą gry (game loop/requestAnimationFrame). W każdej klatce aktualizuj pozycję i rotację czołgu.
+Dostarcz kod w czystym JavaScript, HTML i CSS, bez zewnętrznych bibliotek (chyba że są niezbędne do implementacji szumu Perlina).
+Dodaj komentarze w kluczowych miejscach kodu, wyjaśniające logikę generowania terenu, obliczania wysokości oraz kąta nachylenia czołgu.
+Oczekiwany rezultat:
+Kompletny, działający przykład w postaci zmienionych plików. Przykład powinien renderować pagórkowaty teren oraz czołg oraz reszte gry która pozostaje bez zmian i który poprawnie reaguje na zmiany wysokości terenu, płynnie się wznosząc, opadając i zmieniając swoje nachylenie.

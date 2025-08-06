@@ -11,9 +11,17 @@ const io = new Server(server);
 // --- Konfiguracja i stałe gry ---
 const PORT = process.env.PORT || 3000;
 const MAP_SIZE = 500;
-const MUD_BORDER_WIDTH = 15; // Szerokość błota po każdej stronie planszy
-const PLAYER_COLLISION_RADIUS = 7;
 const POWERUP_TYPES = ["turbo", "machinegun", "missile", "mines"];
+// POPRAWKA: Przywrócenie brakującej stałej
+const PLAYER_COLLISION_RADIUS = 7;
+
+// Parametry generacji terenu
+const TERRAIN_SEGMENTS = 100;
+let TERRAIN_AMPLITUDE = 20;
+let TERRAIN_SCALE = 120;
+let heightMap = [];
+const SANDY_AREA_RADIUS = 150; 
+const HILL_TRANSITION_WIDTH = 50;
 
 const SPAWN_POINTS = [
     { x: 200, z: 0 },   { x: -200, z: 0 },
@@ -31,6 +39,7 @@ const BUILDING_MIN_FLOORS = 2;
 const BUILDING_MAX_FLOORS = 8;
 const BRICK_SIZE = { x: 2.0, y: 1.0, z: 4.0 };
 const PLAYER_HEIGHT = 4.0;
+const TANK_LENGTH = 10.0; 
 
 const TANKS_DATA = {
   pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 22, speed: 18, turretRot: 1.8 }, startY: 1.0 },
@@ -38,7 +47,6 @@ const TANKS_DATA = {
   standard: { name: "Standard", stats: { hp: 100, damage: 25, speed: 15, turretRot: 1.5 }, startY: 1.25 },
 };
 
-// --- Globalny stan gry na serwerze ---
 const gameState = {
   players: {},
   projectiles: {},
@@ -51,6 +59,108 @@ const gameState = {
 
 let nextObjectId = 0;
 let crateSpawnTimer = 10.0;
+
+// --- Implementacja szumu Perlina ---
+const PerlinNoise = new (function() {
+    this.p = new Uint8Array(512);
+    this.init = function(seed) {
+        const p = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) p[i] = i;
+        for (let i = 255; i > 0; i--) {
+            const j = Math.floor((seed % 1) * (i + 1));
+            seed = (seed * 9301 + 49297) % 233280;
+            [p[i], p[j]] = [p[j], p[i]];
+        }
+        for (let i = 0; i < 256; i++) this.p[i] = this.p[i + 256] = p[i];
+    };
+    const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (t, a, b) => a + t * (b - a);
+    const grad = (hash, x, y) => {
+        const h = hash & 15;
+        const u = h < 8 ? x : y;
+        const v = h < 4 ? y : h === 12 || h === 14 ? x : 0;
+        return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+    };
+    this.noise = function(x, y) {
+        const X = Math.floor(x) & 255;
+        const Y = Math.floor(y) & 255;
+        x -= Math.floor(x);
+        y -= Math.floor(y);
+        const u = fade(x);
+        const v = fade(y);
+        const p = this.p;
+        const A = p[X] + Y, B = p[X + 1] + Y;
+        return lerp(v,
+            lerp(u, grad(p[A], x, y), grad(p[B], x - 1, y)),
+            lerp(u, grad(p[A + 1], x, y - 1), grad(p[B + 1], x - 1, y - 1))
+        );
+    };
+})();
+
+// --- Funkcje do obsługi terenu ---
+function generateHeightMap() {
+    PerlinNoise.init(Math.random());
+    console.log(`Generowanie mapy wysokości z amplitudą: ${TERRAIN_AMPLITUDE}, skalą: ${TERRAIN_SCALE}`);
+    heightMap = new Array(TERRAIN_SEGMENTS + 1);
+    for (let i = 0; i <= TERRAIN_SEGMENTS; i++) {
+        heightMap[i] = new Array(TERRAIN_SEGMENTS + 1);
+        for (let j = 0; j <= TERRAIN_SEGMENTS; j++) {
+            const x = (i / TERRAIN_SEGMENTS - 0.5) * MAP_SIZE;
+            const z = (j / TERRAIN_SEGMENTS - 0.5) * MAP_SIZE;
+            const distance_from_center = Math.sqrt(x * x + z * z);
+            
+            const nx = i / TERRAIN_SEGMENTS;
+            const ny = j / TERRAIN_SEGMENTS;
+
+            let height = 0;
+            const hill_noise = PerlinNoise.noise(nx * TERRAIN_SCALE / 100, ny * TERRAIN_SCALE / 100)
+                             + 0.5 * PerlinNoise.noise(nx * TERRAIN_SCALE / 50, ny * TERRAIN_SCALE / 50)
+                             + 0.25 * PerlinNoise.noise(nx * TERRAIN_SCALE / 25, ny * TERRAIN_SCALE / 25);
+            const normalized_hill_height = hill_noise / (1 + 0.5 + 0.25) * TERRAIN_AMPLITUDE;
+
+            if (distance_from_center < SANDY_AREA_RADIUS) {
+                height = 0;
+            } else if (distance_from_center < SANDY_AREA_RADIUS + HILL_TRANSITION_WIDTH) {
+                const transition_factor = (distance_from_center - SANDY_AREA_RADIUS) / HILL_TRANSITION_WIDTH;
+                const eased_factor = transition_factor * transition_factor * (3 - 2 * transition_factor); // Smoothstep
+                height = lerp(0, normalized_hill_height, eased_factor);
+            } else {
+                height = normalized_hill_height;
+            }
+            heightMap[i][j] = height;
+        }
+    }
+}
+
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+
+function getHeightAt(x, z) {
+    if (!heightMap || heightMap.length === 0) return 0;
+    const gridX = (x + MAP_SIZE / 2) / MAP_SIZE * TERRAIN_SEGMENTS;
+    const gridZ = (z + MAP_SIZE / 2) / MAP_SIZE * TERRAIN_SEGMENTS;
+    
+    const x1 = Math.floor(gridX);
+    const z1 = Math.floor(gridZ);
+    const x2 = Math.min(x1 + 1, TERRAIN_SEGMENTS);
+    const z2 = Math.min(z1 + 1, TERRAIN_SEGMENTS);
+
+    if (x1 < 0 || x1 > TERRAIN_SEGMENTS || z1 < 0 || z1 > TERRAIN_SEGMENTS) return 0;
+    if (!heightMap[x1] || !heightMap[x2] || heightMap[x1][z1] === undefined || heightMap[x1][z2] === undefined || heightMap[x2][z1] === undefined || heightMap[x2][z2] === undefined) return 0;
+
+    const h11 = heightMap[x1][z1];
+    const h12 = heightMap[x1][z2];
+    const h21 = heightMap[x2][z1];
+    const h22 = heightMap[x2][z2];
+
+    const tx = gridX - x1;
+    const tz = gridZ - z1;
+
+    const h_x1 = h11 * (1 - tx) + h21 * tx;
+    const h_x2 = h12 * (1 - tx) + h22 * tx;
+    return h_x1 * (1 - tz) + h_x2 * tz;
+}
 
 // --- Logika Pomocnicza ---
 function handleDamage(player, amount, attackerId) {
@@ -77,8 +187,8 @@ function fireCannon(playerId, action) {
     const projectileId = `proj_${nextObjectId++}`;
     const projectile = {
         id: projectileId, ownerId: playerId, damage: TANKS_DATA[player.tankType].stats.damage,
-        position: startPosition, // Pozycja startowa pocisku z klienta
-        direction: direction, // Użyj kierunku od klienta
+        position: startPosition,
+        direction: direction,
         velocity: 160, lifespan: 3.0,
     };
     gameState.projectiles[projectileId] = projectile;
@@ -92,7 +202,7 @@ function fireMachineGun(playerId, action) {
     const bulletId = `bullet_${nextObjectId++}`;
     const bullet = {
         id: bulletId, ownerId: playerId, damage: 3, position: startPosition,
-        direction: direction, // Użyj kierunku od klienta
+        direction: direction,
         velocity: 200, lifespan: 2.0,
     };
     gameState.machineGunBullets[bulletId] = bullet;
@@ -106,7 +216,7 @@ function fireMissile(playerId, action) {
     const missileId = `missile_${nextObjectId++}`;
     const missile = {
         id: missileId, ownerId: playerId, damage: TANKS_DATA[player.tankType].stats.damage * 2, position: startPosition,
-        direction: direction, // Użyj kierunku od klienta
+        direction: direction,
         lifespan: 10.0,
     };
     gameState.missiles[missileId] = missile;
@@ -120,9 +230,11 @@ function dropMine(playerId){
     const mineId = `mine_${nextObjectId++}`;
     const backOffset = 7;
     const minePosition = {
-        x: player.position.x - Math.sin(player.rotation.y) * backOffset, y: 0.25,
-        z: player.position.z - Math.cos(player.rotation.y) * backOffset
+        x: player.position.x - Math.sin(player.rotation.y) * backOffset,
+        z: player.position.z - Math.cos(player.rotation.y) * backOffset,
+        y: 0 
     };
+    minePosition.y = getHeightAt(minePosition.x, minePosition.z) + 0.25;
     const mine = { id: mineId, ownerId: playerId, position: minePosition };
     gameState.mines[mineId] = mine;
     io.emit('objectCreated', { type: 'mine', data: mine });
@@ -182,7 +294,6 @@ function deactivatePowerUp(playerId) {
 function gameLoop() {
     const delta = 1 / 30;
 
-    // --- Aktualizacja Graczy ---
     for (const id in gameState.players) {
         const player = gameState.players[id];
         
@@ -194,6 +305,7 @@ function gameLoop() {
                 player.respawnTimer = 3.0; 
                 player.isSinking = false; 
                 player.sinkingAngle = { x: 0, z: 0 };
+                player.rotation.x = 0;
                 io.emit('objectDestroyed', { type: 'player', id: player.id, attackerId: id, hit: false });
             }
             continue; 
@@ -207,7 +319,9 @@ function gameLoop() {
                 player.ammo = 8; 
                 player.isDestroyed = false;
                 const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
-                player.position = { x: spawnPoint.x, y: tankData.startY, z: spawnPoint.z };
+                player.position = { x: spawnPoint.x, y: 0, z: spawnPoint.z };
+                player.position.y = getHeightAt(player.position.x, player.position.z) + tankData.startY;
+                player.rotation.x = 0;
             }
             continue;
         }
@@ -227,12 +341,28 @@ function gameLoop() {
             moveVector.x -= Math.sin(player.rotation.y) * moveSpeed;
             moveVector.z -= Math.cos(player.rotation.y) * moveSpeed;
         }
-        // Ruch podwozia jest teraz niezależny od myszy
         if (player.keys.KeyA || player.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
         if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
 
 
         if (moveVector.x !== 0 || moveVector.z !== 0) {
+            if (player.keys.KeyW || player.keys.ArrowUp) {
+                const lookAheadDist = 2.0;
+                const lookAheadX = player.position.x + Math.sin(player.rotation.y) * lookAheadDist;
+                const lookAheadZ = player.position.z + Math.cos(player.rotation.y) * lookAheadDist;
+                
+                const currentHeight = player.position.y - TANKS_DATA[player.tankType].startY;
+                const futureHeight = getHeightAt(lookAheadX, lookAheadZ);
+                
+                const slope = (futureHeight - currentHeight) / lookAheadDist;
+                const maxSlope = 0.8;
+                
+                if (slope > maxSlope) {
+                    moveVector.x = 0;
+                    moveVector.z = 0;
+                }
+            }
+
             const newPosX = oldPos.x + moveVector.x;
             const newPosZ = oldPos.z + moveVector.z;
             player.position.x = newPosX;
@@ -241,11 +371,24 @@ function gameLoop() {
             if (checkPlayerBuildingCollision(player)) { player.position.z = oldPos.z; }
         }
         
-        // Wieża i lufa są teraz kontrolowane przez klienta (myszką)
-        // Usunięto sterowanie Q, E, F, V
+        const tankData = TANKS_DATA[player.tankType];
+        
+        const groundHeight = getHeightAt(player.position.x, player.position.z);
+        player.position.y = groundHeight + tankData.startY;
 
-        // Logika tonięcia: czołg tonie dopiero po zjechaniu z błota
-        const safeZone = MAP_SIZE / 2 + MUD_BORDER_WIDTH;
+        const halfLength = TANK_LENGTH / 2;
+        const frontX = player.position.x + Math.sin(player.rotation.y) * halfLength;
+        const frontZ = player.position.z + Math.cos(player.rotation.y) * halfLength;
+        const backX = player.position.x - Math.sin(player.rotation.y) * halfLength;
+        const backZ = player.position.z - Math.cos(player.rotation.y) * halfLength;
+
+        const frontHeight = getHeightAt(frontX, frontZ);
+        const backHeight = getHeightAt(backX, backZ);
+        
+        const heightDifference = frontHeight - backHeight;
+        player.rotation.x = Math.atan2(heightDifference, TANK_LENGTH);
+
+        const safeZone = MAP_SIZE / 2 + 15;
         if (Math.abs(player.position.x) > safeZone || Math.abs(player.position.z) > safeZone) {
             if (!player.isSinking) {
                  player.isSinking = true;
@@ -282,146 +425,180 @@ function gameLoop() {
         }
     }
 
-  const allProjectiles = [
+    const allProjectiles = [
       { list: gameState.projectiles, type: 'projectile' }, { list: gameState.machineGunBullets, type: 'machineGunBullet' }
-  ];
-  for (const projGroup of allProjectiles) {
-    for (const id in projGroup.list) {
-        const p = projGroup.list[id];
-        p.position.x += p.direction.x * p.velocity * delta;
-        p.position.y += p.direction.y * p.velocity * delta;
-        p.position.z += p.direction.z * p.velocity * delta;
-        p.lifespan -= delta;
-        let destroyed = false;
-        
-        for (const playerId in gameState.players) {
-            if (p.ownerId === playerId) continue; const player = gameState.players[playerId]; if (player.isDestroyed || player.isSinking) continue;
-            const distance = Math.sqrt((p.position.x - player.position.x) ** 2 + (p.position.z - player.position.z) ** 2);
-            if (distance < PLAYER_COLLISION_RADIUS) { handleDamage(player, p.damage, p.ownerId); destroyed = true; break; }
-        }
-        if (destroyed) { delete projGroup.list[id]; io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true }); continue; }
+    ];
+    for (const projGroup of allProjectiles) {
+        for (const id in projGroup.list) {
+            const p = projGroup.list[id];
+            p.position.x += p.direction.x * p.velocity * delta;
+            p.position.y += p.direction.y * p.velocity * delta;
+            p.position.z += p.direction.z * p.velocity * delta;
+            p.lifespan -= delta;
+            let destroyed = false;
+            
+            for (const playerId in gameState.players) {
+                if (p.ownerId === playerId) continue; const player = gameState.players[playerId]; if (player.isDestroyed || player.isSinking) continue;
+                const distance = Math.sqrt(
+                    (p.position.x - player.position.x) ** 2 + 
+                    (p.position.y - player.position.y) ** 2 +
+                    (p.position.z - player.position.z) ** 2
+                );
+                if (distance < PLAYER_COLLISION_RADIUS) { handleDamage(player, p.damage, p.ownerId); destroyed = true; break; }
+            }
+            if (destroyed) { delete projGroup.list[id]; io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true }); continue; }
 
-        for(const buildingId in gameState.buildings) {
-            const building = gameState.buildings[buildingId];
-            const bPos = building.position; const bDim = building.dimensions;
-            if (p.position.x >= bPos.x - bDim.x / 2 && p.position.x <= bPos.x + bDim.x / 2 &&
-                p.position.y >= bPos.y && p.position.y <= bPos.y + bDim.y &&
-                p.position.z >= bPos.z - bDim.z / 2 && p.position.z <= bPos.z + bDim.z / 2)
-            {
-                const impactPoint = { ...p.position }; const destroyedBrickIndices = [];
-                const destructionRadius = 2.5;
-                const localHit = { x: p.position.x - bPos.x, y: p.position.y - bPos.y, z: p.position.z - bPos.z };
-                for (let i = 0; i < building.bricks.length; i++) {
-                    const brick = building.bricks[i];
-                    if (brick) {
-                        const distSq = (brick.x - localHit.x)**2 + (brick.y - localHit.y)**2 + (brick.z - localHit.z)**2;
-                        if (distSq < destructionRadius**2) { building.bricks[i] = null; destroyedBrickIndices.push(i); }
+            for(const buildingId in gameState.buildings) {
+                const building = gameState.buildings[buildingId];
+                if (checkProjectileBuildingCollision(p, building)) {
+                    const impactPoint = { ...p.position }; const destroyedBrickIndices = [];
+                    const destructionRadius = 2.5;
+                    const buildingGroundHeight = getHeightAt(building.position.x, building.position.z);
+                    const localHit = { x: p.position.x - building.position.x, y: p.position.y - buildingGroundHeight, z: p.position.z - building.position.z };
+                    
+                    for (let i = 0; i < building.bricks.length; i++) {
+                        const brick = building.bricks[i];
+                        if (brick) {
+                            const distSq = (brick.x - localHit.x)**2 + (brick.y - localHit.y)**2 + (brick.z - localHit.z)**2;
+                            if (distSq < destructionRadius**2) { building.bricks[i] = null; destroyedBrickIndices.push(i); }
+                        }
                     }
+                    if (destroyedBrickIndices.length > 0) { io.emit('buildingDamaged', { buildingId, destroyedBrickIndices, impactPoint }); }
+                    destroyed = true; break;
                 }
-                if (destroyedBrickIndices.length > 0) { io.emit('buildingDamaged', { buildingId, destroyedBrickIndices, impactPoint }); }
-                destroyed = true; break;
+            }
+            if (destroyed) { delete projGroup.list[id]; io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true }); continue; }
+
+            // POPRAWKA: Kolizja pocisków z terenem
+            const terrainHeight = getHeightAt(p.position.x, p.position.z);
+            if (p.position.y <= terrainHeight) {
+                destroyed = true;
+            }
+
+            if (p.lifespan <= 0 || destroyed) {
+                delete projGroup.list[id]; 
+                io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: destroyed }); 
             }
         }
-        if (p.lifespan <= 0 || destroyed || p.position.y < -5) {
-            delete projGroup.list[id]; 
-            io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: destroyed }); 
+    }
+  
+    for (const id in gameState.missiles) {
+        const m = gameState.missiles[id]; m.lifespan -= delta; let targetPlayer = null; let minDistance = Infinity;
+        for(const pId in gameState.players) {
+            if(pId === m.ownerId || gameState.players[pId].isDestroyed || gameState.players[pId].isSinking) continue; const p = gameState.players[pId];
+            const dist = Math.sqrt((m.position.x - p.position.x)**2 + (m.position.z - p.position.z)**2);
+            if (dist < minDistance) { minDistance = dist; targetPlayer = p; }
+        }
+        let destroyed = false;
+        if (targetPlayer) {
+            const speed = 100 * delta;
+            const targetPosWithLead = { x: targetPlayer.position.x, y: targetPlayer.position.y, z: targetPlayer.position.z };
+            const angleToTarget = Math.atan2(targetPosWithLead.z - m.position.z, targetPosWithLead.x - m.position.x);
+            const angleToTargetY = Math.atan2(targetPosWithLead.y - m.position.y, Math.sqrt((targetPosWithLead.x - m.position.x)**2 + (targetPosWithLead.z - m.position.z)**2));
+
+            m.position.x += Math.cos(angleToTarget) * speed; 
+            m.position.z += Math.sin(angleToTarget) * speed;
+            m.position.y += Math.sin(angleToTargetY) * speed;
+
+            if(minDistance < PLAYER_COLLISION_RADIUS) { handleDamage(targetPlayer, m.damage, m.ownerId); destroyed = true; }
+        }
+        if(m.lifespan <= 0 || destroyed) { delete gameState.missiles[id]; io.emit('objectDestroyed', { type: 'missile', id: id, hit: true }); }
+    }
+    for (const mineId in gameState.mines) {
+        const mine = gameState.mines[mineId];
+        for (const playerId in gameState.players) {
+            if(playerId === mine.ownerId || gameState.players[playerId].isDestroyed || gameState.players[playerId].isSinking) continue; const player = gameState.players[playerId];
+            const dist = Math.sqrt((player.position.x - mine.position.x)**2 + (player.position.z - mine.position.z)**2);
+            if(dist < 3) { handleDamage(player, 50, mine.ownerId); delete gameState.mines[mineId]; io.emit('objectDestroyed', {type: 'mine', id: mineId, hit: true}); break; }
         }
     }
-  }
+    for(const id in gameState.players) {
+        const player = gameState.players[id];
+        if (player.powerUpTimer > 0) { player.powerUpTimer -= delta; if (player.powerUpTimer <= 0) { deactivatePowerUp(id); } }
+    }
   
-  for (const id in gameState.missiles) {
-      const m = gameState.missiles[id]; m.lifespan -= delta; let targetPlayer = null; let minDistance = Infinity;
-      for(const pId in gameState.players) {
-          if(pId === m.ownerId || gameState.players[pId].isDestroyed || gameState.players[pId].isSinking) continue; const p = gameState.players[pId];
-          const dist = Math.sqrt((m.position.x - p.position.x)**2 + (m.position.z - p.position.z)**2);
-          if (dist < minDistance) { minDistance = dist; targetPlayer = p; }
-      }
-      let destroyed = false;
-      if (targetPlayer) {
-          const speed = 100 * delta;
-          const angleToTarget = Math.atan2(targetPlayer.position.z - m.position.z, targetPlayer.position.x - m.position.x);
-          m.position.x += Math.cos(angleToTarget) * speed; m.position.z += Math.sin(angleToTarget) * speed;
-          if(minDistance < PLAYER_COLLISION_RADIUS) { handleDamage(targetPlayer, m.damage, m.ownerId); destroyed = true; }
-      }
-      if(m.lifespan <= 0 || destroyed) { delete gameState.missiles[id]; io.emit('objectDestroyed', { type: 'missile', id: id, hit: true }); }
-  }
-  for (const mineId in gameState.mines) {
-      const mine = gameState.mines[mineId];
-      for (const playerId in gameState.players) {
-          if(playerId === mine.ownerId || gameState.players[playerId].isDestroyed || gameState.players[playerId].isSinking) continue; const player = gameState.players[playerId];
-          const dist = Math.sqrt((player.position.x - mine.position.x)**2 + (player.position.z - mine.position.z)**2);
-          if(dist < 3) { handleDamage(player, 50, mine.ownerId); delete gameState.mines[mineId]; io.emit('objectDestroyed', {type: 'mine', id: mineId, hit: true}); break; }
-      }
-  }
-  for(const id in gameState.players) {
-      const player = gameState.players[id];
-      if (player.powerUpTimer > 0) { player.powerUpTimer -= delta; if (player.powerUpTimer <= 0) { deactivatePowerUp(id); } }
-  }
-  
-  if (Object.keys(gameState.crates).length < 3) {
-      crateSpawnTimer -= delta;
-      if (crateSpawnTimer <= 0) {
-          const crateId = `crate_${nextObjectId++}`;
-          let cratePos;
-          let isSafe = false;
-          while(!isSafe) {
-              isSafe = true;
-              cratePos = { x: (Math.random() - 0.5) * (MAP_SIZE - 40), y: 0, z: (Math.random() - 0.5) * (MAP_SIZE - 40) };
-              for(const sp of SPAWN_POINTS) {
-                  const dist = Math.sqrt((cratePos.x - sp.x)**2 + (cratePos.z - sp.z)**2);
-                  if (dist < SPAWN_CLEARANCE_RADIUS) {
-                      isSafe = false;
-                      break;
-                  }
-              }
-          }
+    if (Object.keys(gameState.crates).length < 3) {
+        crateSpawnTimer -= delta;
+        if (crateSpawnTimer <= 0) {
+            const crateId = `crate_${nextObjectId++}`;
+            let cratePos;
+            let isSafe = false;
+            while(!isSafe) {
+                isSafe = true;
+                cratePos = { x: (Math.random() - 0.5) * (MAP_SIZE - 40), y: 0, z: (Math.random() - 0.5) * (MAP_SIZE - 40) };
+                for(const sp of SPAWN_POINTS) {
+                    const dist = Math.sqrt((cratePos.x - sp.x)**2 + (cratePos.z - sp.z)**2);
+                    if (dist < SPAWN_CLEARANCE_RADIUS) {
+                        isSafe = false;
+                        break;
+                    }
+                }
+            }
+            cratePos.y = getHeightAt(cratePos.x, cratePos.z);
 
-          gameState.crates[crateId] = {
-              id: crateId, position: cratePos,
-              powerUpType: POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]
-          };
-          io.emit('objectCreated', {type: 'crate', data: gameState.crates[crateId]}); crateSpawnTimer = 15.0;
-      }
-  }
+            gameState.crates[crateId] = {
+                id: crateId, position: cratePos,
+                powerUpType: POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]
+            };
+            io.emit('objectCreated', {type: 'crate', data: gameState.crates[crateId]}); crateSpawnTimer = 15.0;
+        }
+    }
 
-  io.emit("gameStateUpdate", gameState);
+    io.emit("gameStateUpdate", gameState);
 }
 
-// --- Funkcja sprawdzania kolizji gracza z budynkami ---
 function checkPlayerBuildingCollision(player) {
     const playerRadius = 3.5;
     for (const buildingId in gameState.buildings) {
         const building = gameState.buildings[buildingId];
         const { position: bPos, dimensions: bDim } = building;
-
+        
         if (player.position.x + playerRadius < bPos.x - bDim.x / 2 ||
             player.position.x - playerRadius > bPos.x + bDim.x / 2 ||
             player.position.z + playerRadius < bPos.z - bDim.z / 2 ||
             player.position.z - playerRadius > bPos.z + bDim.z / 2) {
             continue; 
         }
+        
+        let minBuildingHeight = Infinity;
+        const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }];
+        corners.forEach(c => { const h = getHeightAt(c.x, c.z); if(h < minBuildingHeight) minBuildingHeight = h; });
 
-        for (const brick of building.bricks) {
-            if (!brick) continue;
-            const brickWorldPos = { x: bPos.x + brick.x, y: bPos.y + brick.y, z: bPos.z + brick.z, };
-            const brickAABB = {
-                minX: brickWorldPos.x - BRICK_SIZE.x / 2, maxX: brickWorldPos.x + BRICK_SIZE.x / 2,
-                minY: brickWorldPos.y - BRICK_SIZE.y / 2, maxY: brickWorldPos.y + BRICK_SIZE.y / 2,
-                minZ: brickWorldPos.z - BRICK_SIZE.z / 2, maxZ: brickWorldPos.z - BRICK_SIZE.z / 2,
-            };
-
-            if (player.position.x + playerRadius > brickAABB.minX && player.position.x - playerRadius < brickAABB.maxX &&
-                0 < brickAABB.maxY && PLAYER_HEIGHT > brickAABB.minY &&
-                player.position.z + playerRadius > brickAABB.minZ && player.position.z - playerRadius < brickAABB.maxZ) {
-                return true;
-            }
+        const playerAABB = { minY: player.position.y - TANKS_DATA[player.tankType].startY, maxY: player.position.y - TANKS_DATA[player.tankType].startY + PLAYER_HEIGHT };
+        const buildingAABB = { minY: minBuildingHeight, maxY: minBuildingHeight + bDim.y };
+        
+        if (playerAABB.maxY < buildingAABB.minY || playerAABB.minY > buildingAABB.maxY) {
+             continue;
         }
+
+        return true;
     }
     return false;
 }
 
-// --- Tworzenie świata i połączenia ---
+function checkProjectileBuildingCollision(projectile, building) {
+    const { position: bPos, dimensions: bDim } = building;
+
+    if (projectile.position.x < bPos.x - bDim.x / 2 ||
+        projectile.position.x > bPos.x + bDim.x / 2 ||
+        projectile.position.z < bPos.z - bDim.z / 2 ||
+        projectile.position.z > bPos.z + bDim.z / 2) {
+        return false;
+    }
+    
+    let minBuildingHeight = Infinity;
+    const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }];
+    corners.forEach(c => { const h = getHeightAt(c.x, c.z); if(h < minBuildingHeight) minBuildingHeight = h; });
+
+    if (projectile.position.y < minBuildingHeight || projectile.position.y > minBuildingHeight + bDim.y) {
+        return false;
+    }
+
+    return true;
+}
+
 function createProceduralCity() {
+    gameState.buildings = {};
     const cityOrigin = { x: - (CITY_GRID_SIZE * CITY_CELL_SIZE) / 2, z: - (CITY_GRID_SIZE * CITY_CELL_SIZE) / 2 };
     for (let i = 0; i < CITY_GRID_SIZE; i++) {
         for (let j = 0; j < CITY_GRID_SIZE; j++) {
@@ -432,10 +609,11 @@ function createProceduralCity() {
                     z: cityOrigin.z + j * CITY_CELL_SIZE + CITY_CELL_SIZE / 2,
                 };
                 
-                if (Math.abs(position.x) > MAP_SIZE / 2 || Math.abs(position.z) > MAP_SIZE / 2) {
-                    continue;
-                }
+                if (Math.abs(position.x) > MAP_SIZE / 2 || Math.abs(position.z) > MAP_SIZE / 2) continue;
                 
+                const distFromCenter = Math.sqrt(position.x**2 + position.z**2);
+                if (distFromCenter > SANDY_AREA_RADIUS) continue;
+
                 let isTooCloseToSpawn = false;
                 for(const sp of SPAWN_POINTS) {
                     const distance = Math.sqrt((position.x - sp.x)**2 + (position.z - sp.z)**2);
@@ -444,9 +622,7 @@ function createProceduralCity() {
                         break;
                     }
                 }
-                if (isTooCloseToSpawn || Math.sqrt(position.x**2 + position.z**2) < 50) {
-                    continue;
-                }
+                if (isTooCloseToSpawn || Math.sqrt(position.x**2 + position.z**2) < 50) continue;
                 
                 const id = `bld_${nextObjectId++}`;
                 const floors = BUILDING_MIN_FLOORS + Math.floor(Math.random() * (BUILDING_MAX_FLOORS - BUILDING_MIN_FLOORS));
@@ -455,10 +631,10 @@ function createProceduralCity() {
                 const dimensions = { x: widthBricks * BRICK_SIZE.x, y: floors * BRICK_SIZE.y, z: depthBricks * BRICK_SIZE.z };
                 
                 const bricks = [];
-                for (let y = 0; y < floors; y++) {
+                 for (let y = 0; y < floors; y++) {
                     for (let x = 0; x < widthBricks; x++) {
                         for (let z = 0; z < depthBricks; z++) {
-                            if (x === 0 || x === widthBricks - 1 || z === 0 || z === depthBricks - 1) {
+                            if (x === 0 || x === widthBricks - 1 || z === 0 || z === depthBricks - 1 || y === floors - 1) {
                                 bricks.push({
                                     x: (x - widthBricks / 2 + 0.5) * BRICK_SIZE.x,
                                     y: y * BRICK_SIZE.y + BRICK_SIZE.y / 2,
@@ -477,30 +653,48 @@ function createProceduralCity() {
 
 io.on("connection", (socket) => {
   console.log(`Gracz połączony: ${socket.id}`);
+
+  socket.on("setTerrain", (params) => {
+      if(Object.keys(gameState.players).length === 0) {
+          TERRAIN_AMPLITUDE = params.amplitude;
+          TERRAIN_SCALE = params.scale;
+          generateHeightMap();
+          createProceduralCity();
+      }
+  });
+
   socket.on("selectTank", (tankType) => {
     if (gameState.players[socket.id] || !TANKS_DATA[tankType]) return;
     const tankData = TANKS_DATA[tankType];
 
     const spawnPoint = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
-    const startPos = { x: spawnPoint.x, y: tankData.startY, z: spawnPoint.z };
+    const startPos = { x: spawnPoint.x, y: 0, z: spawnPoint.z };
+    startPos.y = getHeightAt(startPos.x, startPos.z) + tankData.startY;
 
     gameState.players[socket.id] = {
-      id: socket.id, tankType: tankType, position: startPos, rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 }, turretRotation: { x: 0, y: 0, z: 0 },
+      id: socket.id, tankType: tankType, position: startPos, 
+      rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 }, 
+      turretRotation: { x: 0, y: 0, z: 0 },
       mantletRotation: { x: 0, y: 0, z: 0 }, health: tankData.stats.hp, maxHealth: tankData.stats.hp, ammo: 8, medkits: 3, score: 0,
       isReloading: false, isDestroyed: false, respawnTimer: 0, keys: {},
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
       isSinking: false, sinkingTimer: 0, sinkingAngle: { x: 0, z: 0 },
-      laserData: { // NOWOŚĆ: Stan lasera dla gracza
-          enabled: true,
-          start: { x: 0, y: 0, z: 0 },
-          end: { x: 0, y: 0, z: 0 }
+      laserData: { 
+          enabled: true, start: { x: 0, y: 0, z: 0 }, end: { x: 0, y: 0, z: 0 }
       }
     };
     
     socket.emit("gameStarted", { 
         playerId: socket.id, 
         initialState: gameState,
-        spawnPoints: SPAWN_POINTS
+        spawnPoints: SPAWN_POINTS,
+        heightMap: heightMap,
+        terrainParams: {
+            size: MAP_SIZE,
+            segments: TERRAIN_SEGMENTS,
+            amplitude: TERRAIN_AMPLITUDE,
+            sandyAreaRadius: SANDY_AREA_RADIUS
+        }
     });
     
     socket.broadcast.emit("playerConnected", gameState.players[socket.id]);
@@ -516,7 +710,6 @@ io.on("connection", (socket) => {
       }
   });
 
-  // NOWOŚĆ: Odbieranie i aktualizacja danych o laserze
   socket.on("laserUpdate", (data) => {
       const player = gameState.players[socket.id];
       if (player && player.laserData) {
@@ -538,6 +731,7 @@ app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
 server.listen(PORT, () => {
   console.log(`Serwer nasłuchuje na porcie ${PORT}`);
+  generateHeightMap(); 
   createProceduralCity();
   setInterval(gameLoop, 1000 / 30);
 });

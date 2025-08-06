@@ -49,6 +49,20 @@
           <button class="select-button">Wybierz</button>
         </div>
       </div>
+       <!-- NOWOŚĆ: Panel do kontroli terenu -->
+       <div id="terrain-controls">
+        <h2 id="terrain-title">Dostosuj Teren</h2>
+        <div class="control-row">
+            <label for="terrain-amplitude">Wysokość Wzgórz:</label>
+            <input type="range" id="terrain-amplitude" min="5" max="50" value="20">
+            <span id="amplitude-value">20</span>
+        </div>
+        <div class="control-row">
+            <label for="terrain-scale">Gęstość Wzgórz:</label>
+            <input type="range" id="terrain-scale" min="50" max="200" value="120">
+            <span id="scale-value">120</span>
+        </div>
+      </div>
     </div>
 
     <!-- UI Gry -->

@@ -13,11 +13,22 @@ let greySmokeMaterial, blackSmokeMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 
+// Zmienne terenu
+let heightMap; 
+let terrainMesh;
+let terrainParams;
+
+// NOWOŚĆ: Zmienne dla śladów gąsienic
+let trackCanvas, trackCtx, trackTexture, trackMesh;
+const TRACK_CANVAS_RESOLUTION = 1024;
+const TRACK_LIFESPAN = 60; // Czas w sekundach, po którym ślady zaczną znikać (niezaimplementowane, ale to dobra praktyka)
+const MIN_TRACK_DISTANCE = 1.0; // Minimalna odległość, jaką czołg musi przejechać, by zostawić nowy ślad
+
 // Zmienne dla celowania z raycastingiem
 let raycaster;
 const mouse = new THREE.Vector2();
 const targetPoint = new THREE.Vector3();
-const aimables = []; // Obiekty, w które można celować (ziemia, budynki, etc.)
+const aimables = []; 
 
 const keys = {};
 let canFire = true;
@@ -40,9 +51,9 @@ const socket = io();
 
 // --- STAŁE I DANE ---
 const TANKS_DATA = {
-  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 22, speed: 18, turretRot: 1.8 }, create: createPL01Tank },
-  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 35, speed: 12, turretRot: 1.2 }, create: createAbramsTank },
-  standard: { name: "Standard", stats: { hp: 100, damage: 25, speed: 15, turretRot: 1.5 }, create: createStandardTank },
+  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 22, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0 },
+  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 35, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5 },
+  standard: { name: "Standard", stats: { hp: 100, damage: 25, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5 },
 };
 const MAP_SIZE = 500;
 const TANK_QUOTES = [
@@ -51,6 +62,43 @@ const TANK_QUOTES = [
   "Zaraz wracam, muszę przeładować.", "Bum! I po strachu.",
 ];
 
+// --- Implementacja szumu Perlina (dla tekstur) ---
+const PerlinNoise = new (function() {
+    this.p = new Uint8Array(512);
+    this.init = function(seed) {
+        const p = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) p[i] = i;
+        for (let i = 255; i > 0; i--) {
+            const j = Math.floor((seed % 1) * (i + 1));
+            seed = (seed * 9301 + 49297) % 233280;
+            [p[i], p[j]] = [p[j], p[i]];
+        }
+        for (let i = 0; i < 256; i++) this.p[i] = this.p[i + 256] = p[i];
+    };
+    const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (t, a, b) => a + t * (b - a);
+    const grad = (hash, x, y) => {
+        const h = hash & 15;
+        const u = h < 8 ? x : y;
+        const v = h < 4 ? y : h === 12 || h === 14 ? x : 0;
+        return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+    };
+    this.noise = function(x, y) {
+        const X = Math.floor(x) & 255;
+        const Y = Math.floor(y) & 255;
+        x -= Math.floor(x);
+        y -= Math.floor(y);
+        const u = fade(x);
+        const v = fade(y);
+        const p = this.p;
+        const A = p[X] + Y, B = p[X + 1] + Y;
+        return lerp(v,
+            lerp(u, grad(p[A], x, y), grad(p[B], x - 1, y)),
+            lerp(u, grad(p[A + 1], x, y - 1), grad(p[B + 1], x - 1, y - 1))
+        );
+    };
+})();
+PerlinNoise.init(Math.random());
 
 // --- FUNKCJE TWORZĄCE OBIEKTY 3D ---
 const LAMBERT_MATERIAL = (color) => new THREE.MeshLambertMaterial({ color });
@@ -59,28 +107,81 @@ function createTrackTexture() {
   for (let i = 0; i < 128; i += 8) { ctx.fillRect(0, i, 32, 4); } const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping; return texture;
 }
 const trackMaterial = new THREE.MeshLambertMaterial({ map: createTrackTexture() });
-function createGroundTexture() {
-  const canvas = document.createElement("canvas"); canvas.width = 256; canvas.height = 256; const ctx = canvas.getContext("2d"); ctx.fillStyle = "#3c581a"; ctx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 8000; i++) { const x = Math.random() * 256; const y = Math.random() * 256; ctx.fillStyle = Math.random() > 0.7 ? "#6B8E23" : "#556B2F"; ctx.fillRect(x, y, 2, 2); }
-  const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(32, 32); return texture;
+
+// NOWOŚĆ: Tekstura terenu rozróżniająca piasek i wzgórza
+function createGroundTexture(heightData, params) {
+    const canvas = document.createElement("canvas");
+    const size = 512;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+
+    const sandColor = new THREE.Color("#d2b48c");
+    const grassColor = new THREE.Color("#3c581a");
+    const rockColor = new THREE.Color("#6b6b47");
+    const dirtColor = new THREE.Color("#5C4033");
+    
+    const minHeight = -params.amplitude;
+    const maxHeight = params.amplitude;
+
+    for (let i = 0; i < size; i++) {
+        for (let j = 0; j < size; j++) {
+            const u = i / (size - 1);
+            const v = j / (size - 1);
+            
+            const worldX = (u - 0.5) * params.size;
+            const worldZ = (v - 0.5) * params.size;
+            const distFromCenter = Math.sqrt(worldX*worldX + worldZ*worldZ);
+
+            const gridX = Math.floor(u * params.segments);
+            const gridY = Math.floor(v * params.segments);
+            
+            const height = heightData[gridX][gridY];
+            const normalizedHeight = (height - minHeight) / (maxHeight - minHeight);
+
+            let color;
+            if (distFromCenter < params.sandyAreaRadius) {
+                 color = sandColor.clone();
+                 const noise = PerlinNoise.noise(i * 0.2, j * 0.2) * 0.03;
+                 color.offsetHSL(0, 0, noise);
+            } else {
+                color = grassColor.clone();
+                if (normalizedHeight > 0.5) {
+                    color.lerp(dirtColor, (normalizedHeight - 0.5) * 2);
+                }
+                if (normalizedHeight > 0.7) {
+                    color.lerp(rockColor, (normalizedHeight - 0.7) * 3.33);
+                }
+                const noise = PerlinNoise.noise(i * 0.1, j * 0.1) * 0.05;
+                color.offsetHSL(0, 0, noise);
+            }
+
+            ctx.fillStyle = `#${color.getHexString()}`;
+            ctx.fillRect(i, j, 1, 1);
+        }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    return texture;
 }
 function createMudTexture() {
     const canvas = document.createElement("canvas");
     canvas.width = 256; canvas.height = 256;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#5C4033"; // Ciemny brąz
+    ctx.fillStyle = "#5C4033";
     ctx.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 4000; i++) {
         const x = Math.random() * 256;
         const y = Math.random() * 256;
-        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)"; // Ciemniejsze i jaśniejsze plamy
+        const color = Math.random() > 0.5 ? "rgba(44, 32, 25, 0.7)" : "rgba(112, 84, 62, 0.5)";
         ctx.fillStyle = color;
         ctx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
     }
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(32, 32);
+    texture.repeat.set(16, 16);
     return texture;
 }
 function createBrickMaterial() {
@@ -129,12 +230,61 @@ function createAbramsTank(color) {
     turretGroup.position.y = hullHeight; tank.add(turretGroup);
     tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; return tank;
 }
+
+function getHeightAt(x, z) {
+    if (!heightMap || !terrainParams) return 0;
+    const { size, segments } = terrainParams;
+    const gridX = (x + size / 2) / size * segments;
+    const gridZ = (z + size / 2) / size * segments;
+    
+    const x1 = Math.floor(gridX);
+    const z1 = Math.floor(gridZ);
+    const x2 = Math.min(x1 + 1, segments);
+    const z2 = Math.min(z1 + 1, segments);
+
+    if (x1 < 0 || x1 > segments || z1 < 0 || z1 > segments) return 0;
+    if (!heightMap[x1] || !heightMap[x2]) return 0;
+
+    const h11 = heightMap[x1][z1];
+    const h12 = heightMap[x1][z2];
+    const h21 = heightMap[x2][z1];
+    const h22 = heightMap[x2][z2];
+
+    if (h11 === undefined || h12 === undefined || h21 === undefined || h22 === undefined) return 0;
+
+    const tx = gridX - x1;
+    const tz = gridZ - z1;
+
+    const h_x1 = h11 * (1 - tx) + h21 * tx;
+    const h_x2 = h12 * (1 - tx) + h22 * tx;
+    return h_x1 * (1 - tz) + h_x2 * tz;
+}
+
 function createBuildingMesh(buildingData) {
-    const { id, position, brickSize, bricks } = buildingData;
+    const { id, position, brickSize, bricks, dimensions } = buildingData;
     const brickGeometry = new THREE.BoxGeometry(brickSize.x, brickSize.y, brickSize.z);
     if (!brickMaterial) { brickMaterial = createBrickMaterial(); }
     const instancedMesh = new THREE.InstancedMesh(brickGeometry, brickMaterial, bricks.length);
-    instancedMesh.position.set(position.x, position.y, position.z);
+    
+    let minHeight = Infinity;
+    const halfW = dimensions.x / 2;
+    const halfD = dimensions.z / 2;
+    const corners = [
+        { x: position.x - halfW, z: position.z - halfD },
+        { x: position.x + halfW, z: position.z - halfD },
+        { x: position.x - halfW, z: position.z + halfD },
+        { x: position.x + halfW, z: position.z + halfD },
+        { x: position.x, z: position.z }
+    ];
+
+    for (const corner of corners) {
+        const h = getHeightAt(corner.x, corner.z);
+        if (h < minHeight) {
+            minHeight = h;
+        }
+    }
+    instancedMesh.position.set(position.x, minHeight, position.z);
+    
     const matrix = new THREE.Matrix4();
     let instanceIdx = 0;
     for (const brick of bricks) {
@@ -218,28 +368,26 @@ function createSpawnMarker() {
     return marker;
 }
 
-// NOWOŚĆ: Funkcja pomocnicza do tworzenia lasera
 function createPlayerLaser() {
     const laserGeometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(2 * 3); // 2 wierzchołki, po 3 koordynaty
+    const positions = new Float32Array(2 * 3);
     laserGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const laserMaterial = new THREE.LineBasicMaterial({
         color: 0xff0000,
         transparent: true,
         opacity: 0.6,
-        linewidth: 2, // może wymagać LineMaterial z addons
+        linewidth: 2,
     });
     const laser = new THREE.Line(laserGeometry, laserMaterial);
     laser.frustumCulled = false;
-    laser.visible = false; // Domyślnie niewidoczny
+    laser.visible = false;
     scene.add(laser);
     return laser;
 }
 
 function createSmokeTexture() {
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
+    canvas.width = 128; canvas.height = 128;
     const ctx = canvas.getContext('2d');
     const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
@@ -287,10 +435,24 @@ function initializeUI() {
     document.querySelectorAll(".select-button").forEach((button) => {
         button.addEventListener("click", (e) => {
             if (button.disabled) return; const card = e.target.closest(".tank-card"); const tankType = card.id.split("-")[1];
-            socket.emit("selectTank", tankType); document.getElementById("start-screen").style.display = "none"; isSelectionScreenActive = false;
+            
+            const amplitude = parseInt(document.getElementById('terrain-amplitude').value, 10);
+            const scale = parseInt(document.getElementById('terrain-scale').value, 10);
+            socket.emit("setTerrain", { amplitude, scale });
+
+            socket.emit("selectTank", tankType); 
+            document.getElementById("start-screen").style.display = "none"; isSelectionScreenActive = false;
             selectionRenderers.forEach(({ renderer }) => renderer.dispose()); selectionRenderers = [];
         });
     });
+
+    const ampSlider = document.getElementById('terrain-amplitude');
+    const ampValue = document.getElementById('amplitude-value');
+    ampSlider.addEventListener('input', () => ampValue.textContent = ampSlider.value);
+
+    const scaleSlider = document.getElementById('terrain-scale');
+    const scaleValue = document.getElementById('scale-value');
+    scaleSlider.addEventListener('input', () => scaleValue.textContent = scaleSlider.value);
 }
 function initSelectionScreenRenderers() {
     Object.keys(TANKS_DATA).forEach((tankKey) => {
@@ -394,12 +556,8 @@ function displayKillNotification(attackerId, victimId) {
     const notificationElement = document.createElement('div');
     notificationElement.className = 'kill-notification';
     notificationElement.innerHTML = message;
-
     container.appendChild(notificationElement);
-
-    setTimeout(() => {
-        notificationElement.remove();
-    }, 5000); 
+    setTimeout(() => { notificationElement.remove(); }, 5000); 
 }
 
 function displayJoinNotification(playerId) {
@@ -410,22 +568,35 @@ function displayJoinNotification(playerId) {
     const notificationElement = document.createElement('div');
     notificationElement.className = 'join-notification';
     notificationElement.innerHTML = `👋 ${playerName} dołączył do bitwy!`;
-
     container.appendChild(notificationElement);
-
-    setTimeout(() => {
-        notificationElement.remove();
-    }, 5000);
+    setTimeout(() => { notificationElement.remove(); }, 5000);
 }
 
 
 // --- LOGIKA GRY (KLIENT) ---
 function initGame(payload) {
-    localPlayerId = payload.playerId; clientGameState = payload.initialState; isGameStarted = true;
-    renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
-    scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, 200, 450);
+    localPlayerId = payload.playerId; 
+    clientGameState = payload.initialState; 
+    isGameStarted = true;
+    
+    heightMap = payload.heightMap;
+    terrainParams = payload.terrainParams;
+
+    renderer = new THREE.WebGLRenderer({ antialias: true }); 
+    renderer.setSize(window.innerWidth, window.innerHeight); 
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+    
+    scene = new THREE.Scene(); scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.Fog(0x87ceeb, 300, 550);
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); clock = new THREE.Clock();
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); dirLight.position.set(100, 80, 50); scene.add(dirLight);
+    
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8)); 
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7); 
+    dirLight.position.set(100, 80, 50); 
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    scene.add(dirLight);
     
     raycaster = new THREE.Raycaster();
     document.body.classList.add('crosshair-cursor');
@@ -435,37 +606,72 @@ function initGame(payload) {
     minimapCanvas.height = 220;
     minimapCtx = minimapCanvas.getContext('2d');
     
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ map: createGroundTexture() }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.name = 'ground'; // Nazwa do raycastingu
-    scene.add(ground);
-    aimables.push(ground);
+    const terrainGeometry = new THREE.PlaneGeometry(
+        terrainParams.size, terrainParams.size, 
+        terrainParams.segments, terrainParams.segments
+    );
+    const vertices = terrainGeometry.attributes.position.array;
+    const segments = terrainParams.segments;
+    for (let i = 0; i <= segments; i++) {
+        for (let j = 0; j <= segments; j++) {
+            const vertexIndex = (i * (segments + 1) + j);
+            vertices[vertexIndex * 3 + 2] = heightMap[j][i];
+        }
+    }
+    terrainGeometry.attributes.position.needsUpdate = true;
+    terrainGeometry.computeVertexNormals();
 
-    const mudBorderWidth = 30;
-    const mudGeometry = new THREE.PlaneGeometry(MAP_SIZE + mudBorderWidth, MAP_SIZE + mudBorderWidth);
+    const groundMaterial = new THREE.MeshLambertMaterial({ map: createGroundTexture(heightMap, terrainParams) });
+    terrainMesh = new THREE.Mesh(terrainGeometry, groundMaterial);
+    terrainMesh.rotation.x = -Math.PI / 2;
+    terrainMesh.name = 'ground';
+    terrainMesh.receiveShadow = true;
+    scene.add(terrainMesh);
+    aimables.push(terrainMesh);
+
+    // NOWOŚĆ: Utworzenie płaszczyzny na ślady gąsienic
+    trackCanvas = document.createElement('canvas');
+    trackCanvas.width = TRACK_CANVAS_RESOLUTION;
+    trackCanvas.height = TRACK_CANVAS_RESOLUTION;
+    trackCtx = trackCanvas.getContext('2d');
+    trackCtx.fillStyle = 'rgba(0,0,0,0)'; // Wypełnienie przezroczystością
+    trackCtx.fillRect(0, 0, trackCanvas.width, trackCanvas.height);
+    
+    trackTexture = new THREE.CanvasTexture(trackCanvas);
+    const trackPlaneMaterial = new THREE.MeshBasicMaterial({
+        map: trackTexture,
+        transparent: true,
+        depthWrite: false, // Zapobiega problemom z przezroczystością
+    });
+
+    trackMesh = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), trackPlaneMaterial);
+    trackMesh.rotation.x = -Math.PI / 2;
+    trackMesh.position.y = 0.05; // Unosimy minimalnie nad terenem, aby uniknąć z-fightingu
+    scene.add(trackMesh);
+
+
+    // NOWOŚĆ: Zmiana błota na obrzeże za pomocą RingGeometry
+    const shoreWidth = 30;
+    const mudGeometry = new THREE.RingGeometry(MAP_SIZE / 2, MAP_SIZE / 2 + shoreWidth, 128);
     const mudMaterial = new THREE.MeshLambertMaterial({ map: createMudTexture() });
     const mud = new THREE.Mesh(mudGeometry, mudMaterial);
     mud.rotation.x = -Math.PI / 2;
-    mud.position.y = -0.1; 
+    mud.position.y = 0.01; // Lekko nad wodą, ale pod terenem
     scene.add(mud);
 
     const waterGeometry = new THREE.PlaneGeometry(MAP_SIZE * 5, MAP_SIZE * 5);
     const waterMaterial = new THREE.MeshStandardMaterial({
-        color: 0x006994,
-        metalness: 0.1,
-        roughness: 0.2,
-        transparent: true,
-        opacity: 0.75,
+        color: 0x006994, metalness: 0.1, roughness: 0.2, transparent: true, opacity: 0.75,
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    water.position.y = -0.4;
+    water.position.y = -0.5; // Poniżej błota
     scene.add(water);
     
     if (payload.spawnPoints) {
         for(const sp of payload.spawnPoints) {
             const marker = createSpawnMarker();
-            marker.position.set(sp.x, 0, sp.z);
+            marker.position.set(sp.x, getHeightAt(sp.x, sp.z), sp.z);
             scene.add(marker);
         }
     }
@@ -497,11 +703,8 @@ function handleFireInput() {
     const localPlayerMesh = gameObjects.players[localPlayerId];
     const barrelWorldPos = new THREE.Vector3();
     localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
-
-    // Oblicz wektor kierunku od lufy do punktu celowania
     const direction = new THREE.Vector3().subVectors(targetPoint, barrelWorldPos).normalize();
 
-    // Wyślij pozycję startową lufy i kierunek
     socket.emit('playerAction', { type: 'fire', direction: direction, startPosition: barrelWorldPos });
     canFire = false;
     fireCooldown = cooldownTime;
@@ -514,7 +717,7 @@ function setupEventListeners() {
         if (e.code === 'KeyR') socket.emit('playerAction', { type: 'reload' });
         if (e.code === 'KeyB') socket.emit('playerAction', { type: 'heal' });
         if (e.code === 'KeyG') socket.emit('playerAction', { type: 'dropMine' });
-        if (e.code === 'KeyL') socket.emit('playerAction', { type: 'toggleLaser' }); // NOWOŚĆ: Przełączanie lasera
+        if (e.code === 'KeyL') socket.emit('playerAction', { type: 'toggleLaser' });
     });
     const menuEl = document.getElementById("menu"), mapEl = document.getElementById("map-overlay"), scoreEl = document.getElementById("score-overlay");
     document.addEventListener("keydown", (e) => {
@@ -526,16 +729,14 @@ function setupEventListeners() {
     });
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
 
-    // --- Nowe eventy dla myszy ---
     document.addEventListener('mousemove', (e) => {
         if (isGameStarted) {
-            // Normalizuj pozycję myszy do współrzędnych urządzenia (-1 do +1)
             mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
             mouse.y = - (e.clientY / window.innerHeight) * 2 + 1;
         }
     });
     document.addEventListener('mousedown', (e) => {
-        if(isGameStarted && e.button === 0) { // Tylko lewy przycisk
+        if(isGameStarted && e.button === 0) {
              handleFireInput();
         }
     });
@@ -550,9 +751,10 @@ function reconcileGameState(serverState) {
             const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(tankColor));
             tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
             tank.isSinkingBubbleShown = false;
-            
-            // NOWOŚĆ: Dodaj laser do obiektu gracza
             tank.laserSight = createPlayerLaser();
+            
+            // NOWOŚĆ: Inicjalizacja pozycji dla śladów
+            tank.lastTrackPos = new THREE.Vector3(Infinity, Infinity, Infinity);
 
             scene.add(tank); 
             gameObjects.players[id] = tank;
@@ -562,7 +764,6 @@ function reconcileGameState(serverState) {
     for (const id of serverBuildingIds) {
         if (!gameObjects.buildings[id]) { createBuildingMesh(serverState.buildings[id]); }
     }
-
     const objectTypes = ['crates'];
     for (const type of objectTypes) {
         const serverObjectIds = Object.keys(serverState[type] || {});
@@ -634,7 +835,6 @@ function drawMinimap() {
         return { x: centerX + rotatedX * scale, y: centerY - rotatedZ * scale };
     };
     
-    // --- Rysowanie tła i siatki ---
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.beginPath();
@@ -656,10 +856,8 @@ function drawMinimap() {
     ctx.moveTo(centerX, centerY - radius); ctx.lineTo(centerX, centerY + radius);
     ctx.stroke();
 
-    // --- Rysowanie obiektów ---
     const currentTime = Date.now();
 
-    // Budynki
     ctx.fillStyle = 'rgba(50, 200, 50, 0.25)';
     for (const id in gameObjects.buildings) {
         const buildingData = gameObjects.buildings[id]?.data;
@@ -690,7 +888,6 @@ function drawMinimap() {
         }
     }
     
-    // Skrzynki
     const crateBlink = Math.sin(currentTime * 0.005) * 0.4 + 0.6;
     ctx.fillStyle = `rgba(255, 223, 0, ${crateBlink})`;
     ctx.strokeStyle = `rgba(255, 223, 0, ${crateBlink + 0.2})`;
@@ -706,7 +903,6 @@ function drawMinimap() {
         }
     }
 
-    // Wrogowie
     ctx.fillStyle = '#ff1a1a';
     for (const id in clientGameState.players) {
         if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
@@ -719,7 +915,6 @@ function drawMinimap() {
         }
     }
 
-    // --- Linia skanująca ---
     const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
     sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)');
     sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)');
@@ -732,7 +927,6 @@ function drawMinimap() {
     ctx.fill();
     ctx.restore(); 
 
-    // --- Ikona gracza ---
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.fillStyle = '#66ff66';
@@ -746,7 +940,6 @@ function drawMinimap() {
     ctx.fill();
     ctx.restore();
 
-    // --- Ramka zewnętrzna ---
     ctx.strokeStyle = 'rgba(50, 255, 50, 0.8)';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -756,6 +949,41 @@ function drawMinimap() {
 
 
 // --- GŁÓWNA PĘTLA RENDEROWANIA ---
+// NOWOŚĆ: Funkcja do rysowania śladów na płótnie
+function drawTracks(tank) {
+    const state = clientGameState.players[tank.id];
+    if (!state) return;
+
+    // Pobierz dane czołgu i jego pozycję
+    const tankData = TANKS_DATA[state.tankType];
+    const trackWidth = tankData.hullWidth / 2 - 0.5;
+    
+    // Oblicz wektory przesunięcia dla lewej i prawej gąsienicy
+    const rightTrackOffset = new THREE.Vector3(trackWidth, 0, 0).applyQuaternion(tank.quaternion);
+    const leftTrackOffset = new THREE.Vector3(-trackWidth, 0, 0).applyQuaternion(tank.quaternion);
+    
+    // Pozycje gąsienic w świecie
+    const rightTrackPos = tank.position.clone().add(rightTrackOffset);
+    const leftTrackPos = tank.position.clone().add(leftTrackOffset);
+
+    // Rysuj obie gąsienice
+    [leftTrackPos, rightTrackPos].forEach(trackPos => {
+        // Konwertuj pozycję świata na pozycję na płótnie
+        const canvasX = (trackPos.x / MAP_SIZE + 0.5) * TRACK_CANVAS_RESOLUTION;
+        const canvasY = (trackPos.z / MAP_SIZE + 0.5) * TRACK_CANVAS_RESOLUTION;
+        
+        trackCtx.save();
+        trackCtx.translate(canvasX, canvasY);
+        trackCtx.rotate(-state.rotation.y); // Obróć ślad zgodnie z obrotem czołgu
+        trackCtx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+        trackCtx.fillRect(-1.5, -3, 3, 6); // Rysuj prostokątny ślad
+        trackCtx.restore();
+    });
+    
+    // Oznacz teksturę jako wymagającą aktualizacji
+    trackTexture.needsUpdate = true;
+}
+
 function animate() {
     if (!isGameStarted) return;
     requestAnimationFrame(animate);
@@ -764,7 +992,6 @@ function animate() {
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
     
-    // Aktualizacja stanu z klawiatury jest wysyłana do serwera
     socket.emit("playerInput", keys);
 
     for (const id in clientGameState.players) {
@@ -776,9 +1003,20 @@ function animate() {
             clientTank.position.lerp(new THREE.Vector3(serverPlayer.position.x, serverPlayer.position.y, serverPlayer.position.z), 0.25);
             
             const targetChassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, serverPlayer.rotation.y, 0));
-            const targetTiltQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverPlayer.sinkingAngle.x, 0, serverPlayer.sinkingAngle.z));
-            const finalQuaternion = targetChassisQuaternion.multiply(targetTiltQuaternion);
+            const targetPitchQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverPlayer.rotation.x, 0, 0));
+            const targetSinkingQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(serverPlayer.sinkingAngle.x, 0, serverPlayer.sinkingAngle.z));
+
+            const finalQuaternion = targetChassisQuaternion.multiply(targetPitchQuaternion).multiply(targetSinkingQuaternion);
+
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
+
+            // NOWOŚĆ: Logika zostawiania śladów
+            const dist = clientTank.position.distanceTo(clientTank.lastTrackPos);
+            const distFromCenter = clientTank.position.length();
+            if (dist > MIN_TRACK_DISTANCE && distFromCenter < terrainParams.sandyAreaRadius) {
+                drawTracks(clientTank);
+                clientTank.lastTrackPos.copy(clientTank.position);
+            }
             
             if (id !== localPlayerId) {
                 clientTank.turret.rotation.y = serverPlayer.turretRotation.y;
@@ -806,7 +1044,6 @@ function animate() {
                 }
             }
 
-            // NOWOŚĆ: Aktualizacja laserów wszystkich graczy
             if (clientTank.laserSight && serverPlayer.laserData) {
                 const laser = clientTank.laserSight;
                 const data = serverPlayer.laserData;
@@ -846,7 +1083,11 @@ function animate() {
         }
     }
 
-    for (const id in gameObjects.crates) { gameObjects.crates[id].rotation.y += 0.5 * delta; }
+    for (const id in gameObjects.crates) { 
+        gameObjects.crates[id].rotation.y += 0.5 * delta; 
+        const pos = gameObjects.crates[id].position;
+        pos.y = getHeightAt(pos.x, pos.z) + 1.5 + Math.sin(clock.getElapsedTime() * 2 + id.length) * 0.5;
+    }
     
     const gravity = -9.8;
     for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
@@ -878,13 +1119,19 @@ function animate() {
     for (let i = gameObjects.wreckage.length - 1; i >= 0; i--) {
         const wreck = gameObjects.wreckage[i];
         wreck.lifespan -= delta;
+        const wreckGroundHeight = getHeightAt(wreck.object.position.x, wreck.object.position.z);
         if (wreck.lifespan <= 0) { scene.remove(wreck.object); wreck.object.traverse(c => { if(c.isMesh) { c.geometry.dispose(); if(c.material.isMaterial) c.material.dispose(); }}); gameObjects.wreckage.splice(i, 1); continue; }
-        if (wreck.object.position.y > -5 || wreck.velocity.y > 0) {
-            wreck.velocity.y += wreckGravity * delta; wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
+        if (wreck.object.position.y > wreckGroundHeight) {
+            wreck.velocity.y += wreckGravity * delta; 
+            wreck.object.position.add(wreck.velocity.clone().multiplyScalar(delta));
             wreck.object.rotation.x += wreck.angularVelocity.x * delta;
             wreck.object.rotation.y += wreck.angularVelocity.y * delta;
             wreck.object.rotation.z += wreck.angularVelocity.z * delta;
-        } else { wreck.object.position.y = -5; }
+        } else { 
+            wreck.object.position.y = wreckGroundHeight; 
+            wreck.velocity.y = 0;
+            wreck.angularVelocity.multiplyScalar(0.95);
+        }
     }
 
      for (const playerId in gameObjects.players) {
@@ -898,12 +1145,10 @@ function animate() {
         }
     }
 
-    // --- LOGIKA CELOWANIA LOKALNEGO GRACZA I KAMERY ---
     const localPlayerMesh = gameObjects.players[localPlayerId];
     if (localPlayerMesh) {
         const localPlayerState = clientGameState.players[localPlayerId];
 
-        // 1. Raycasting - znajdź punkt celowania
         raycaster.setFromCamera(mouse, camera);
         const intersects = raycaster.intersectObjects(aimables, true);
 
@@ -915,42 +1160,42 @@ function animate() {
         }
 
         if (localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
-            // 2. Obróć wieżę i lufę w kierunku celu
             const turret = localPlayerMesh.turret;
             const mantlet = localPlayerMesh.mantlet;
-            const chassis = turret.parent;
-            const localTargetInChassis = chassis.worldToLocal(targetPoint.clone());
-            const targetTurretAngle = Math.atan2(localTargetInChassis.x, localTargetInChassis.z);
+            
+            const localTargetInTurret = turret.worldToLocal(targetPoint.clone());
+            
+            const targetTurretAngle = Math.atan2(localTargetInTurret.x, localTargetInTurret.z);
             let currentAngle = turret.rotation.y;
             let diff = targetTurretAngle - currentAngle;
             while (diff < -Math.PI) diff += 2 * Math.PI;
             while (diff > Math.PI) diff -= 2 * Math.PI;
             turret.rotation.y += diff * 0.15;
-            const localTargetInTurret = turret.worldToLocal(targetPoint.clone());
+
             const targetMantletAngle = Math.atan2(localTargetInTurret.y, Math.sqrt(localTargetInTurret.x**2 + localTargetInTurret.z**2));
             mantlet.rotation.x = THREE.MathUtils.lerp(mantlet.rotation.x, Math.max(-0.5, Math.min(0.2, targetMantletAngle)), 0.15);
             
-            // 3. Zaktualizuj stan i wyślij do serwera
             localPlayerState.turretRotation.y = turret.rotation.y;
             localPlayerState.mantletRotation.x = mantlet.rotation.x;
             socket.emit('playerAimUpdate', { turretY: turret.rotation.y, mantletX: mantlet.rotation.x });
 
-            // NOWOŚĆ: Wyślij dane o laserze do serwera
             const barrelWorldPos = new THREE.Vector3();
             localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
             socket.emit('laserUpdate', { start: barrelWorldPos, end: targetPoint });
         }
         
-        // 4. Logika kamery
         if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
             const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
             camera.position.lerp(dronePosition, 0.05);
             camera.lookAt(localPlayerMesh.position);
-        } else {
+        } else if (localPlayerState) {
             camera.fov = 75;
             camera.updateProjectionMatrix();
             const offset = new THREE.Vector3(0, 20, -30);
-            const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(localPlayerMesh.quaternion));
+            
+            const chassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, localPlayerState.rotation.y, 0));
+            
+            const cameraTargetPosition = localPlayerMesh.position.clone().add(offset.applyQuaternion(chassisQuaternion));
             camera.position.lerp(cameraTargetPosition, 0.1);
             camera.lookAt(localPlayerMesh.position.clone().add(new THREE.Vector3(0, 3, 0)));
         }
@@ -1020,8 +1265,8 @@ socket.on("playerConnected", (playerData) => {
     tank.rotation.y = playerData.rotation.y;
     tank.isSinkingBubbleShown = false;
     
-    // NOWOŚĆ: Dodaj laser do obiektu nowego gracza
     tank.laserSight = createPlayerLaser();
+    tank.lastTrackPos = new THREE.Vector3(Infinity, Infinity, Infinity); // NOWOŚĆ: Inicjalizacja dla nowego gracza
 
     scene.add(tank);
     gameObjects.players[playerData.id] = tank;
@@ -1037,7 +1282,6 @@ socket.on("playerDisconnected", (id) => {
         if (index > -1) {
             aimables.splice(index, 1);
         }
-        // NOWOŚĆ: Usuń laser gracza ze sceny
         scene.remove(gameObjects.players[id].laserSight);
         
         scene.remove(gameObjects.players[id]);
