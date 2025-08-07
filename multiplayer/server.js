@@ -10,22 +10,26 @@ const io = new Server(server);
 
 // --- Konfiguracja i stałe gry ---
 const PORT = process.env.PORT || 3000;
-const POWERUP_TYPES = ["turbo", "machinegun", "mines"]; // Usunięto 'missile'
+const POWERUP_TYPES = ["turbo", "machinegun", "mines"];
 const PLAYER_COLLISION_RADIUS = 7;
 
-// Domyślne/startowe wartości, które mogą być zmienione przez pierwszego gracza
 let MAP_SIZE = 500; 
 let TERRAIN_AMPLITUDE = 20;
 let TERRAIN_SCALE = 120;
 let isGameConfigured = false; 
 
 const MAP_SIZES = { S: 300, M: 500, L: 700, XL: 900, XXL: 1200 };
-
 const TERRAIN_SEGMENTS = 100;
 let heightMap = [];
 const SANDY_AREA_RADIUS = 150; 
 const HILL_TRANSITION_WIDTH = 50;
 const MUD_BORDER_WIDTH = 30;
+
+let minMapHeight = Infinity;
+let maxMapHeight = -Infinity;
+let currentWaterLevelY = -Infinity;
+let targetWaterLevelY = -Infinity;
+let isFlooding = false;
 
 const SPAWN_POINTS = [
     { x: 0.4, z: 0 },   { x: -0.4, z: 0 },
@@ -75,7 +79,6 @@ let nextObjectId = 0;
 let crateSpawnTimer = 10.0;
 let ammoCrateSpawnTimer = 15.0;
 
-// --- Implementacja szumu Perlina ---
 const PerlinNoise = new (function() {
     this.p = new Uint8Array(512);
     this.init = function(seed) {
@@ -112,11 +115,28 @@ const PerlinNoise = new (function() {
     };
 })();
 
-// --- Funkcje do obsługi terenu ---
+function flood(percentage) {
+    if (minMapHeight === Infinity || maxMapHeight === -Infinity) {
+        console.error("Mapa nie została jeszcze w pełni wygenerowana. Nie można ustawić poziomu wody.");
+        return;
+    }
+    const clampedPercentage = Math.max(0, Math.min(100, percentage));
+    
+    targetWaterLevelY = minMapHeight + (maxMapHeight - minMapHeight) * (clampedPercentage / 100);
+    
+    isFlooding = true;
+    console.log(`Zlecenie zalania: Poziom wody ustawiony na ${clampedPercentage}%. Cel Y: ${targetWaterLevelY.toFixed(2)}`);
+
+    io.emit('waterLevelUpdate', { targetLevel: targetWaterLevelY });
+}
+
 function generateHeightMap() {
     PerlinNoise.init(Math.random());
     console.log(`Generowanie mapy (${MAP_SIZE}x${MAP_SIZE}) z amplitudą: ${TERRAIN_AMPLITUDE}, skalą: ${TERRAIN_SCALE}`);
     heightMap = new Array(TERRAIN_SEGMENTS + 1);
+    minMapHeight = Infinity;
+    maxMapHeight = -Infinity;
+
     for (let i = 0; i <= TERRAIN_SEGMENTS; i++) {
         heightMap[i] = new Array(TERRAIN_SEGMENTS + 1);
         for (let j = 0; j <= TERRAIN_SEGMENTS; j++) {
@@ -146,9 +166,16 @@ function generateHeightMap() {
                 height = normalized_hill_height;
             }
             heightMap[i][j] = height;
+
+            if (height < minMapHeight) minMapHeight = height;
+            if (height > maxMapHeight) maxMapHeight = height;
         }
     }
+    currentWaterLevelY = minMapHeight - 5.0; 
+    targetWaterLevelY = minMapHeight - 5.0;
+    console.log(`Wygenerowano mapę. Min wysokość: ${minMapHeight.toFixed(2)}, Max wysokość: ${maxMapHeight.toFixed(2)}`);
 }
+
 function lerp(a, b, t) { return a + (b - a) * t; }
 function getHeightAt(x, z) {
     if (!heightMap || heightMap.length === 0) return 0;
@@ -164,7 +191,6 @@ function getHeightAt(x, z) {
     return h_x1 * (1 - tz) + h_x2 * tz;
 }
 
-// --- Logika Pomocnicza ---
 function handleDamage(player, amount, attackerId) {
     if (!player || player.isDestroyed || player.isSinking) return;
     player.health -= amount;
@@ -183,7 +209,6 @@ function applyEMP(player, duration) {
     player.empDisableTimer = Math.max(player.empDisableTimer, duration);
 }
 
-// --- Logika Strzelania ---
 function fireWeapon(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.isReloading || player.isEmpDisabled) return;
@@ -284,9 +309,17 @@ function deactivatePowerUp(playerId) {
     const player = gameState.players[playerId];
     if (player) { player.activePowerUp = null; player.powerUpTimer = 0; player.powerUpAmmo = 0; }
 }
-// --- Główna pętla gry ---
+
 function gameLoop() {
     const delta = 1 / 30;
+
+    if (isFlooding) {
+        currentWaterLevelY = lerp(currentWaterLevelY, targetWaterLevelY, 0.005);
+        if (Math.abs(currentWaterLevelY - targetWaterLevelY) < 0.01) {
+            currentWaterLevelY = targetWaterLevelY;
+            isFlooding = false;
+        }
+    }
 
     for (const id in gameState.players) {
         const player = gameState.players[id];
@@ -298,8 +331,10 @@ function gameLoop() {
             }
         }
         
+        // --- MODYFIKACJA: Logika "isSinking" jest teraz obsługiwana oddzielnie ---
         if (player.isSinking) {
-            player.sinkingTimer -= delta; player.position.y -= 3.5 * delta;
+            player.sinkingTimer -= delta; 
+            player.position.y -= 3.5 * delta;
             if (player.sinkingTimer <= 0) {
                 player.isDestroyed = true; player.respawnTimer = 3.0; player.isSinking = false; 
                 player.sinkingAngle = { x: 0, z: 0 }; player.rotation.x = 0;
@@ -371,7 +406,8 @@ function gameLoop() {
         const frontHeight = getHeightAt(frontX, frontZ); const backHeight = getHeightAt(backX, backZ);
         const heightDifference = backHeight - frontHeight;
         player.rotation.x = Math.atan2(heightDifference, TANK_LENGTH);
-
+        
+        // --- MODYFIKACJA: Przywrócenie logiki tonięcia POZA MAPĄ ---
         const safeZone = MAP_SIZE / 2;
         if (Math.abs(player.position.x) > safeZone + TANK_LENGTH / 2 || Math.abs(player.position.z) > safeZone + TANK_LENGTH / 2) {
             if (!player.isSinking) {
@@ -427,14 +463,14 @@ function gameLoop() {
                 if (p.ownerId === playerId) continue; const player = gameState.players[playerId]; if (player.isDestroyed || player.isSinking) continue;
                 const distance = Math.sqrt((p.position.x - player.position.x) ** 2 + (p.position.y - player.position.y) ** 2 + (p.position.z - player.position.z) ** 2);
                 if (distance < PLAYER_COLLISION_RADIUS) { 
-                    if (p.blastRadius > 0) { destroyed = true; } // Detonate on proximity for blast weapons
+                    if (p.blastRadius > 0) { destroyed = true; }
                     else { handleDamage(player, p.damage, p.ownerId); destroyed = true; }
                     break; 
                 }
             }
-            if (destroyed) { /* Handled below after terrain check */ }
+            if (destroyed) {}
             else if (checkProjectileBuildingCollision(p, Object.values(gameState.buildings))) { destroyed = true; }
-            else if (getHeightAt(p.position.x, p.position.z) > p.position.y) { destroyed = true; }
+            else if (getHeightAt(p.position.x, p.position.z) > p.position.y || p.position.y < currentWaterLevelY) { destroyed = true; }
             
             if (p.lifespan <= 0) { destroyed = true; }
 
@@ -485,7 +521,7 @@ function gameLoop() {
             m.position.x += Math.cos(angleToTarget) * speed; m.position.z += Math.sin(angleToTarget) * speed; m.position.y += Math.sin(angleToTargetY) * speed;
             if(minDistance < PLAYER_COLLISION_RADIUS) { destroyed = true; }
         }
-        if(m.lifespan <= 0) destroyed = true;
+        if(m.lifespan <= 0 || m.position.y < currentWaterLevelY) destroyed = true;
         if(destroyed) {
              for (const playerId in gameState.players) {
                 const player = gameState.players[playerId]; if (player.isDestroyed || player.isSinking) continue;
@@ -672,7 +708,8 @@ io.on("connection", (socket) => {
         playerId: socket.id, initialState: gameState,
         spawnPoints: SPAWN_POINTS.map(p => ({ x: p.x * MAP_SIZE / 2, z: p.z * MAP_SIZE / 2 })),
         heightMap: heightMap,
-        terrainParams: { size: MAP_SIZE, segments: TERRAIN_SEGMENTS, amplitude: TERRAIN_AMPLITUDE, sandyAreaRadius: SANDY_AREA_RADIUS, mudBorderWidth: MUD_BORDER_WIDTH }
+        terrainParams: { size: MAP_SIZE, segments: TERRAIN_SEGMENTS, amplitude: TERRAIN_AMPLITUDE, sandyAreaRadius: SANDY_AREA_RADIUS, mudBorderWidth: MUD_BORDER_WIDTH },
+        waterLevel: currentWaterLevelY
     });
     
     socket.broadcast.emit("playerConnected", gameState.players[socket.id]);
@@ -689,6 +726,17 @@ io.on("connection", (socket) => {
       if (player && player.laserData) { player.laserData.start = data.start; player.laserData.end = data.end; }
   });
   socket.on("playerAction", (action) => { handlePlayerAction(socket, action); });
+  
+  // --- NOWY NASŁUCHIWACZ DLA ŻĄDANIA ZMIANY WODY OD KLIENTA ---
+  socket.on('clientRequestFlood', (percentage) => {
+      console.log(`Otrzymano żądanie zmiany poziomu wody od ${socket.id} na ${percentage}%`);
+      if (typeof percentage === 'number' && percentage >= 0 && percentage <= 100) {
+          flood(percentage);
+      } else {
+          console.error(`Nieprawidłowe żądanie zmiany poziomu wody od ${socket.id}:`, percentage);
+      }
+  });
+  
   socket.on("disconnect", () => {
     console.log(`Gracz rozłączony: ${socket.id}`);
     delete gameState.players[socket.id];

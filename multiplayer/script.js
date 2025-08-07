@@ -18,6 +18,10 @@ let heightMap;
 let terrainMesh;
 let terrainParams;
 
+let mapWaterMesh;
+let currentWaterLevel = -Infinity;
+let targetWaterLevel = -Infinity;
+
 let trackCanvas, trackCtx, trackTexture, trackMesh;
 const TRACK_CANVAS_RESOLUTION = 1024;
 const MIN_TRACK_DISTANCE = 1.0;
@@ -237,7 +241,7 @@ function createEMPTankEffect(tankMesh) {
     const effect = {
         mesh: effectMesh,
         target: tankMesh,
-        lifespan: 0.2, // Krótki czas życia, będzie resetowany w pętli animacji
+        lifespan: 0.2,
     };
     gameObjects.particles.push(effect);
     scene.add(effectMesh);
@@ -263,7 +267,7 @@ function createSmokeCloud(position, radius, duration) {
         cloud.particles.push(p);
         scene.add(p.mesh);
     }
-    gameObjects.smokeClouds[Date.now()] = cloud; // Używamy timestamp jako ID
+    gameObjects.smokeClouds[Date.now()] = cloud;
 }
 
 // --- LOGIKA UI ---
@@ -401,6 +405,10 @@ function displayJoinNotification(playerId) {
 function initGame(payload) {
     localPlayerId = payload.playerId; clientGameState = payload.initialState; isGameStarted = true;
     heightMap = payload.heightMap; terrainParams = payload.terrainParams;
+    
+    currentWaterLevel = payload.waterLevel;
+    targetWaterLevel = payload.waterLevel;
+
     renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); 
     renderer.shadowMap.enabled = true; document.body.appendChild(renderer.domElement);
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87CEEB); scene.fog = new THREE.Fog(0x87CEEB, 2000, 15000); 
@@ -424,9 +432,26 @@ function initGame(payload) {
     const trackPlaneMaterial = new THREE.MeshBasicMaterial({ map: trackTexture, transparent: true, depthWrite: false });
     trackMesh = new THREE.Mesh(new THREE.PlaneGeometry(terrainParams.size, terrainParams.size), trackPlaneMaterial);
     trackMesh.rotation.x = -Math.PI / 2; trackMesh.position.y = 0.05; scene.add(trackMesh);
-    const waterGeometry = new THREE.PlaneGeometry(terrainParams.size * 5, terrainParams.size * 5);
-    const waterMaterial = new THREE.MeshStandardMaterial({ color: 0x006994, metalness: 0.1, roughness: 0.2, transparent: true, opacity: 0.75, });
-    const water = new THREE.Mesh(waterGeometry, waterMaterial); water.rotation.x = -Math.PI / 2; water.position.y = -0.5; scene.add(water);
+    
+    // --- MODYFIKACJA: Przywrócenie dwóch rodzajów wody ---
+    const waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x006994, metalness: 0.1, roughness: 0.2, transparent: true, opacity: 0.75,
+    });
+    
+    // 1. Woda na mapie, animowana
+    const mapWaterGeometry = new THREE.PlaneGeometry(terrainParams.size, terrainParams.size);
+    mapWaterMesh = new THREE.Mesh(mapWaterGeometry, waterMaterial);
+    mapWaterMesh.rotation.x = -Math.PI / 2;
+    mapWaterMesh.position.y = currentWaterLevel;
+    scene.add(mapWaterMesh);
+    
+    // 2. Woda poza mapą, statyczna, powodująca tonięcie
+    const outOfBoundsWaterGeometry = new THREE.PlaneGeometry(terrainParams.size * 5, terrainParams.size * 5);
+    const outOfBoundsWater = new THREE.Mesh(outOfBoundsWaterGeometry, waterMaterial);
+    outOfBoundsWater.rotation.x = -Math.PI / 2;
+    outOfBoundsWater.position.y = -0.5; // Stała, niska pozycja
+    scene.add(outOfBoundsWater);
+
     if (payload.spawnPoints) { for(const sp of payload.spawnPoints) { const marker = createSpawnMarker(); marker.position.set(sp.x, getHeightAt(sp.x, sp.z), sp.z); scene.add(marker); } }
     const smokeTexture = createSmokeTexture();
     greySmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x888888, depthWrite: false });
@@ -587,6 +612,15 @@ function animate() {
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
     socket.emit("playerInput", keys);
 
+    if (mapWaterMesh && currentWaterLevel !== targetWaterLevel) {
+        currentWaterLevel = THREE.MathUtils.lerp(currentWaterLevel, targetWaterLevel, 0.01);
+        mapWaterMesh.position.y = currentWaterLevel;
+
+        if (Math.abs(currentWaterLevel - targetWaterLevel) < 0.01) {
+            currentWaterLevel = targetWaterLevel;
+        }
+    }
+
     for (const id in clientGameState.players) {
         const serverPlayer = clientGameState.players[id]; const clientTank = gameObjects.players[id];
         if (clientTank && serverPlayer) {
@@ -606,8 +640,17 @@ function animate() {
                 drawTracks(clientTank); clientTank.lastTrackPos.copy(clientTank.position);
             }
             if (id !== localPlayerId) { clientTank.turret.rotation.y = serverPlayer.turretRotation.y; clientTank.mantlet.rotation.x = serverPlayer.mantletRotation.x; }
-            if (serverPlayer.isSinking && !clientTank.isSinkingBubbleShown) { showCustomQuote(id, "Bul... bul... bul..."); clientTank.isSinkingBubbleShown = true; } 
-            else if (!serverPlayer.isSinking && clientTank.isSinkingBubbleShown) { const bubble = document.getElementById(`bubble-${id}`); if (bubble) bubble.style.display = 'none'; clientTank.isSinkingBubbleShown = false; }
+            
+            // --- MODYFIKACJA: "bul bul bul" tylko gdy flaga isSinking jest prawdziwa (czyli poza mapą) ---
+            if (serverPlayer.isSinking && !clientTank.isSinkingBubbleShown) { 
+                showCustomQuote(id, "Bul... bul... bul..."); 
+                clientTank.isSinkingBubbleShown = true; 
+            } else if (!serverPlayer.isSinking && clientTank.isSinkingBubbleShown) { 
+                const bubble = document.getElementById(`bubble-${id}`); 
+                if (bubble) bubble.style.display = 'none'; 
+                clientTank.isSinkingBubbleShown = false; 
+            }
+            
             clientTank.smokeCooldown = (clientTank.smokeCooldown || 0) - delta;
             if (clientTank.smokeCooldown <= 0 && !serverPlayer.isDestroyed && !serverPlayer.isSinking) {
                 const hpPercent = (serverPlayer.health / serverPlayer.maxHealth) * 100;
@@ -678,7 +721,7 @@ function animate() {
             const lifePercent = cloud.lifespan / cloud.initialLifespan;
             cloud.particles.forEach(p => {
                 p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
-                const currentScale = p.startSize * (1 - Math.abs(lifePercent - 0.5) * 2); // grow and shrink
+                const currentScale = p.startSize * (1 - Math.abs(lifePercent - 0.5) * 2);
                 p.mesh.scale.set(currentScale, currentScale, currentScale);
                 p.mesh.material.opacity = Math.min(0.8, lifePercent * 2);
                 p.mesh.lookAt(camera.position);
@@ -760,6 +803,10 @@ socket.on("gameStateUpdate", (serverState) => {
     }
     clientGameState = serverState;
 });
+socket.on('waterLevelUpdate', (data) => {
+    console.log(`Otrzymano aktualizację poziomu wody. Cel: ${data.targetLevel.toFixed(2)}`);
+    targetWaterLevel = data.targetLevel;
+});
 socket.on('objectCreated', (payload) => {
     if (payload.type === 'smokeCloud') {
         const { position, radius, lifespan } = payload.data;
@@ -819,6 +866,21 @@ socket.on("playerDisconnected", (id) => {
     }
 });
 socket.on('killNotification', ({ attackerId, victimId }) => { displayKillNotification(attackerId, victimId); });
+
+// --- MODYFIKACJA: Udostępnienie funkcji `flood` w konsoli ---
+window.flood = function(percentage) {
+    if (socket && socket.connected) {
+        const p = parseInt(percentage, 10);
+        if (isNaN(p) || p < 0 || p > 100) {
+            console.error("Proszę podać liczbę w zakresie 0-100.");
+            return;
+        }
+        console.log(`Wysyłanie żądania zmiany poziomu wody do ${p}%...`);
+        socket.emit('clientRequestFlood', p);
+    } else {
+        console.error("Nie połączono z serwerem. Nie można wysłać polecenia.");
+    }
+};
 
 // --- START APLIKACJI ---
 initializeUI();
