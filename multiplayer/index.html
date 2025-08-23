@@ -49,7 +49,6 @@
           <button class="select-button">Wybierz i Walcz</button>
         </div>
       </div>
-       <!-- NOWOŚĆ: Panel do konfiguracji serwera -->
        <fieldset id="server-config-panel">
         <div id="terrain-controls">
           <h2 id="terrain-title">Ustawienia Serwera (Tylko Pierwszy Gracz)</h2>
@@ -82,17 +81,18 @@
     <!-- UI Gry -->
     <div id="sniper-overlay" style="display: none;"></div>
 
-    <!-- Pojedynczy HUD dla gracza lokalnego -->
     <div id="hud" class="hud" style="display: none;">
       <div class="hud-line"><strong>TWÓJ CZOŁG</strong><span>PUNKTY: <span id="score-value">0</span></span></div>
       <div class="hud-line"><span>HP:</span><span id="hp-value"></span></div>
       <div class="hud-bar"><div id="hp-bar" class="hud-bar-fill"></div></div>
-      <div class="hud-line" style="margin-top: 10px;"><span>Amunicja:</span><span id="ammo-value"></span></div>
-      <div class="hud-line"><span>Apteczki:</span><span id="medkits-value"></span></div>
+      <div class="hud-line" style="margin-top: 10px;"><span>Apteczki:</span><span id="medkits-value"></span></div>
       <div id="powerup-hud" class="hud-powerup" style="display: none;"></div>
     </div>
     
-    <!-- Minimapa -->
+    <div id="weapon-bar" class="weapon-bar" style="display: none;">
+      <!-- Sloty na broń będą generowane dynamicznie przez JS -->
+    </div>
+
     <div id="minimap-container" style="display: none;">
       <canvas id="minimap"></canvas>
     </div>
@@ -101,7 +101,6 @@
     <div id="speech-bubbles-container"></div>
     <div id="kill-feed-container"></div>
 
-    <!-- Nakładki Menu, Mapy i Wyników -->
     <div id="menu" class="overlay" style="display: none">
       <h1>PAUZA</h1>
       <p>Naciśnij ESC</p>
@@ -126,6 +125,7 @@
         }
       }
     </script>
+    <script type="module" src="background.js"></script>
     <script type="module" src="script.js"></script>
   </body>
 </html>
