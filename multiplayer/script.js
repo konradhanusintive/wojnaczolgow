@@ -131,24 +131,23 @@ function createTrackMarkTexture(type) {
     canvas.width = 32; canvas.height = 64;
     const ctx = canvas.getContext("2d");
 
-    // Lżejsze, bardziej naturalne kolory z niską przezroczystością
+    // Zwiększone krycie i dostosowane kolory dla lepszej widoczności
     const color = (type === 'sand' || type === 'mud') 
-        ? 'rgba(139, 125, 107, 0.12)' // Ciemniejszy, przybrudzony piasek
-        : 'rgba(101, 67, 33, 0.18)';    // Jasny brąz/błoto
+        ? 'rgba(100, 80, 60, 0.25)' // Ciemniejszy piasek, 25% krycia
+        : 'rgba(80, 55, 35, 0.35)'; // Błoto, 35% krycia
 
-    // Tworzenie gradientu, aby krawędzie były przezroczyste
     const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
     const transparent = 'rgba(0,0,0,0)';
     gradient.addColorStop(0, transparent);
-    gradient.addColorStop(0.2, color);
-    gradient.addColorStop(0.8, color);
+    gradient.addColorStop(0.15, color); // Szybsze dojście do pełnego koloru
+    gradient.addColorStop(0.85, color); // Dłuższe utrzymanie koloru
     gradient.addColorStop(1, transparent);
     
     ctx.fillStyle = gradient;
 
-    // Rysowanie cieńszych śladów
-    for (let i = 0; i < canvas.height; i += 9) { // Zwiększona przerwa
-        ctx.fillRect(0, i, canvas.width, 3); // Cieńszy ślad
+    // Grubsze i gęstsze ślady
+    for (let i = 2; i < canvas.height; i += 8) { // Mniejsza przerwa
+        ctx.fillRect(0, i, canvas.width, 4); // Grubszy ślad
     }
     return new THREE.CanvasTexture(canvas);
 }
@@ -277,7 +276,6 @@ function triggerMuzzleFlash(barrel) {
     };
     gameObjects.particles.push(particle);
     scene.add(flash);
-    // Dym z lufy
     setTimeout(() => {
         if (!barrel) return;
         const smokePos = new THREE.Vector3();
@@ -290,7 +288,6 @@ function triggerMuzzleFlash(barrel) {
     }, 50);
 }
 function createHitEffect(position, impulse) {
-    // Iskry
     for (let i = 0; i < 15; i++) {
         const particle = new THREE.Mesh(
             new THREE.BoxGeometry(0.1, 0.1, 0.8),
@@ -304,7 +301,6 @@ function createHitEffect(position, impulse) {
         gameObjects.particles.push(particle);
         scene.add(particle);
     }
-    // Płomień
     createExplosion(position, 1.0);
 }
 function createEMPTankEffect(tankMesh) {
@@ -344,7 +340,6 @@ function createSmokeCloud(position, radius, duration) {
 }
 
 // --- LOGIKA UI ---
-// ... (bez zmian)
 function initializeUI() {
     document.getElementById("intro-logo").addEventListener("animationend", () => {
         document.getElementById("intro-screen").style.display = "none"; document.getElementById("start-screen").style.display = "flex";
@@ -491,7 +486,7 @@ function initGame(payload) {
     minimapCanvas = document.getElementById('minimap'); minimapCanvas.width = 220; minimapCanvas.height = 220; minimapCtx = minimapCanvas.getContext('2d');
     const terrainGeometry = new THREE.PlaneGeometry(terrainParams.size, terrainParams.size, terrainParams.segments, terrainParams.segments);
     const vertices = terrainGeometry.attributes.position.array; const segments = terrainParams.segments;
-    for (let i = 0; i <= segments; i++) { for (let j = 0; j <= segments; j++) { vertices[(i * (segments + 1) + j) * 3 + 2] = heightMap[j][i]; } }
+    for (let i = 0; i <= segments; i++) { for (let j = 0; j <= segments; j++) { vertices[(j * (segments + 1) + i) * 3 + 2] = heightMap[i][j]; } }
     terrainGeometry.attributes.position.needsUpdate = true; terrainGeometry.computeVertexNormals();
     const groundMaterial = new THREE.MeshLambertMaterial({ map: createGroundTexture(heightMap, terrainParams) });
     terrainMesh = new THREE.Mesh(terrainGeometry, groundMaterial); terrainMesh.rotation.x = -Math.PI / 2; terrainMesh.name = 'ground';
@@ -637,7 +632,6 @@ function createObjectMesh(payload) {
     }
 }
 
-// ... (reszta kodu bez zmian, aż do `socket.on('terrainDeformed',...)`)
 function updateTerrainMesh(data) {
     if (!terrainMesh) return;
 
@@ -653,8 +647,8 @@ function updateTerrainMesh(data) {
     const startZ_grid = Math.max(0, Math.floor(((position.z - radius) + size / 2) / step));
     const endZ_grid = Math.min(segments, Math.ceil(((position.z + radius) + size / 2) / step));
 
-    for (let j = startZ_grid; j <= endZ_grid; j++) { // Iteruj po Z (wiersze)
-        for (let i = startX_grid; i <= endX_grid; i++) { // Iteruj po X (kolumny)
+    for (let j = startZ_grid; j <= endZ_grid; j++) {
+        for (let i = startX_grid; i <= endX_grid; i++) {
             const Px = i * step - size / 2;
             const Pz = j * step - size / 2;
             const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
@@ -770,7 +764,7 @@ function animate() {
     for (const id in gameObjects.tracks) {
         const track = gameObjects.tracks[id];
         const serverTrack = clientGameState.tracks ? clientGameState.tracks[id] : null;
-        if (track && serverTrack && track.initialLifespan) { // Upewnij się, że initialLifespan istnieje
+        if (track && serverTrack && track.initialLifespan) {
             const lifePercent = Math.max(0, serverTrack.lifespan / track.initialLifespan);
             track.mesh.material.opacity = lifePercent;
         }
