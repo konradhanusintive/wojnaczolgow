@@ -12,6 +12,8 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const POWERUP_TYPES = ["turbo", "machinegun", "mines"]; 
 const PLAYER_COLLISION_RADIUS = 7;
+const MAX_TRACKS = 500; // Maksymalna liczba śladów na mapie jednocześnie
+const TRACK_DISTANCE_THRESHOLD = 3.0; // Jak daleko czołg musi przejechać, by zostawić ślad
 
 // Domyślne/startowe wartości, które mogą być zmienione przez pierwszego gracza
 let MAP_SIZE = 500; 
@@ -45,9 +47,9 @@ const PLAYER_HEIGHT = 4.0;
 const TANK_LENGTH = 10.0; 
 
 const TANKS_DATA = {
-  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0 },
-  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3 },
-  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25 },
+  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0 },
+  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3, hullWidth: 6.5 },
+  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25, hullWidth: 5.5 },
 };
 
 const WEAPONS_DATA = {
@@ -69,6 +71,8 @@ const gameState = {
   mines: {},
   missiles: {},
   machineGunBullets: {},
+  tracks: {},
+  craters: {}
 };
 
 let nextObjectId = 0;
@@ -164,17 +168,22 @@ function getHeightAt(x, z) {
     return h_x1 * (1 - tz) + h_x2 * tz;
 }
 
+function getTerrainTypeAt(x, z) {
+    const max_dist = Math.max(Math.abs(x), Math.abs(z));
+    if (max_dist > MAP_SIZE / 2 - MUD_BORDER_WIDTH) return 'mud';
+    if (max_dist < SANDY_AREA_RADIUS) return 'sand';
+    return 'grass';
+}
+
 // --- Logika Pomocnicza ---
 function handleDamage(player, amount, attackerId, impulseDirection = {x:0, y:0, z:0}, impulseMagnitude = 0, impactPoint = player.position) {
     if (!player || player.isDestroyed || player.isSinking) return;
     
     player.health -= amount;
 
-    // Zastosuj impuls (odrzut)
     player.impulse.x += impulseDirection.x * impulseMagnitude;
     player.impulse.z += impulseDirection.z * impulseMagnitude;
     
-    // Wyślij informację o trafieniu do wszystkich klientów, aby mogli wyświetlić efekty
     io.emit('playerHit', { 
         victimId: player.id, 
         impactPoint: impactPoint, 
@@ -213,11 +222,9 @@ function fireWeapon(playerId, action) {
     player.ammo[weaponId]--;
     const { direction, startPosition } = action;
 
-    // Zastosuj odrzut do strzelającego gracza
     const recoilMagnitude = weaponData.recoilImpulse || 0;
     player.impulse.x -= direction.x * recoilMagnitude;
     player.impulse.z -= direction.z * recoilMagnitude;
-
 
     if (weaponData.type === 'projectile') {
         const projectileId = `proj_${nextObjectId++}`;
@@ -246,7 +253,6 @@ function fireMachineGun(playerId, action) {
     if (!player || player.isDestroyed || player.isSinking || player.powerUpTimer <= 0) return;
     const { direction, startPosition } = action;
 
-    // Zastosuj mały odrzut dla karabinu
     const recoilMagnitude = 1.5;
     player.impulse.x -= direction.x * recoilMagnitude;
     player.impulse.z -= direction.z * recoilMagnitude;
@@ -318,9 +324,7 @@ function gameLoop() {
         
         if (player.isEmpDisabled) {
             player.empDisableTimer -= delta;
-            if (player.empDisableTimer <= 0) {
-                player.isEmpDisabled = false;
-            }
+            if (player.empDisableTimer <= 0) player.isEmpDisabled = false;
         }
         
         if (player.isSinking) {
@@ -368,14 +372,12 @@ function gameLoop() {
             if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
         }
 
-        // Zastosuj i wytłum impuls
         player.position.x += player.impulse.x * delta;
         player.position.z += player.impulse.z * delta;
         player.impulse.x *= 0.85; 
         player.impulse.z *= 0.85;
         if (Math.abs(player.impulse.x) < 0.1) player.impulse.x = 0;
         if (Math.abs(player.impulse.z) < 0.1) player.impulse.z = 0;
-
 
         if (moveVector.x !== 0 || moveVector.z !== 0) {
             if (player.keys.KeyW || player.keys.ArrowUp) {
@@ -388,9 +390,12 @@ function gameLoop() {
                 const maxSlope = 0.8;
                 if (slope > maxSlope) { moveVector.x = 0; moveVector.z = 0; }
             }
-            const newPosX = oldPos.x + moveVector.x; const newPosZ = oldPos.z + moveVector.z;
-            player.position.x = newPosX; if (checkPlayerBuildingCollision(player)) { player.position.x = oldPos.x; }
-            player.position.z = newPosZ; if (checkPlayerBuildingCollision(player)) { player.position.z = oldPos.z; }
+            const newPosX = player.position.x + moveVector.x; 
+            const newPosZ = player.position.z + moveVector.z;
+            
+            const tempPos = { ...player.position };
+            player.position.x = newPosX; if (checkPlayerBuildingCollision(player)) { player.position.x = tempPos.x; }
+            player.position.z = newPosZ; if (checkPlayerBuildingCollision(player)) { player.position.z = tempPos.z; }
         }
         
         const tankData = TANKS_DATA[player.tankType];
@@ -418,6 +423,32 @@ function gameLoop() {
                  player.sinkingAngle.x = -normZ * tiltMagnitude; player.sinkingAngle.z = normX * tiltMagnitude;
             }
         }
+
+        // --- Tworzenie śladów gąsienic ---
+        const distSq = (player.position.x - player.lastTrackPos.x)**2 + (player.position.z - player.lastTrackPos.z)**2;
+        if (distSq > TRACK_DISTANCE_THRESHOLD**2) {
+            const trackWidth = tankData.hullWidth / 2 - 0.5;
+            const cosR = Math.cos(player.rotation.y);
+            const sinR = Math.sin(player.rotation.y);
+            
+            const rightTrackPos = { x: player.position.x + cosR * trackWidth, z: player.position.z - sinR * trackWidth };
+            const leftTrackPos = { x: player.position.x - cosR * trackWidth, z: player.position.z + sinR * trackWidth };
+
+            [leftTrackPos, rightTrackPos].forEach(pos => {
+                const trackId = `track_${nextObjectId++}`;
+                const track = {
+                    id: trackId,
+                    position: { x: pos.x, y: getHeightAt(pos.x, pos.z), z: pos.z },
+                    rotationY: player.rotation.y,
+                    lifespan: 20.0, // 20 sekund życia
+                    type: getTerrainTypeAt(pos.x, pos.z)
+                };
+                gameState.tracks[trackId] = track;
+                io.emit('objectCreated', { type: 'track', data: track });
+            });
+            player.lastTrackPos = { ...player.position };
+        }
+
 
         for (const otherId in gameState.players) {
             if (id === otherId) continue; const otherPlayer = gameState.players[otherId]; if (otherPlayer.isDestroyed || otherPlayer.isSinking) continue;
@@ -461,20 +492,29 @@ function gameLoop() {
                 if (p.ownerId === playerId) continue; const player = gameState.players[playerId]; if (player.isDestroyed || player.isSinking) continue;
                 const distance = Math.sqrt((p.position.x - player.position.x) ** 2 + (p.position.y - player.position.y) ** 2 + (p.position.z - player.position.z) ** 2);
                 if (distance < PLAYER_COLLISION_RADIUS) { 
-                    if (p.blastRadius > 0) { 
-                        destroyed = true; 
-                    } else { 
-                        handleDamage(player, p.damage, p.ownerId, p.direction, p.impulse, p.position); 
-                        destroyed = true; 
-                    }
+                    if (p.blastRadius > 0) { destroyed = true; } 
+                    else { handleDamage(player, p.damage, p.ownerId, p.direction, p.impulse, p.position); destroyed = true; }
                     break; 
                 }
             }
-            if (destroyed) { /* Handled below after terrain check */ }
+            if (destroyed) { /* Handled below */ }
             else if (checkProjectileBuildingCollision(p, Object.values(gameState.buildings))) { destroyed = true; }
-            else if (getHeightAt(p.position.x, p.position.z) > p.position.y) { destroyed = true; }
+            else if (getHeightAt(p.position.x, p.position.z) > p.position.y) {
+                destroyed = true;
+                // --- Tworzenie kraterów ---
+                if (p.weaponId === 'he') {
+                    const craterId = `crater_${nextObjectId++}`;
+                    const crater = {
+                        id: craterId,
+                        position: { x: p.position.x, y: getHeightAt(p.position.x, p.position.z), z: p.position.z },
+                        radius: 6 + Math.random() * 2
+                    };
+                    gameState.craters[craterId] = crater;
+                    io.emit('objectCreated', { type: 'crater', data: crater });
+                }
+            }
             
-            if (p.lifespan <= 0) { destroyed = true; }
+            if (p.lifespan <= 0) destroyed = true;
 
             if (destroyed) {
                 const impactPoint = { ...p.position };
@@ -486,15 +526,9 @@ function gameLoop() {
                         if (dist < p.blastRadius) {
                             const damageFalloff = 1 - (dist / p.blastRadius);
                             const impulseFalloff = Math.max(0, 1 - (dist / p.blastRadius));
-                            const impulseDirection = {
-                                x: player.position.x - impactPoint.x,
-                                y: 0,
-                                z: player.position.z - impactPoint.z
-                            };
+                            const impulseDirection = { x: player.position.x - impactPoint.x, y: 0, z: player.position.z - impactPoint.z };
                             const len = Math.sqrt(impulseDirection.x**2 + impulseDirection.z**2) || 1;
-                            impulseDirection.x /= len;
-                            impulseDirection.z /= len;
-
+                            impulseDirection.x /= len; impulseDirection.z /= len;
                             handleDamage(player, p.damage * damageFalloff, p.ownerId, impulseDirection, p.impulse * impulseFalloff, impactPoint);
                         }
                     }
@@ -502,7 +536,7 @@ function gameLoop() {
                         for (const playerId in gameState.players) {
                            const player = gameState.players[playerId]; if (player.isDestroyed || player.isSinking) continue;
                            const dist = Math.sqrt((player.position.x - impactPoint.x)**2 + (player.position.z - impactPoint.z)**2);
-                           if (dist < p.blastRadius) { applyEMP(player, weaponData.effectDuration); }
+                           if (dist < p.blastRadius) applyEMP(player, weaponData.effectDuration);
                         }
                     } else if (p.weaponId === 'smoke') {
                         const cloudId = `smoke_${nextObjectId++}`;
@@ -510,7 +544,6 @@ function gameLoop() {
                         io.emit('objectCreated', { type: 'smokeCloud', data: gameState.smokeClouds[cloudId] });
                     }
                 }
-                
                 delete projGroup.list[id]; 
                 io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true, weaponId: p.weaponId }); 
             }
@@ -531,7 +564,7 @@ function gameLoop() {
             const angleToTarget = Math.atan2(targetPosWithLead.z - m.position.z, targetPosWithLead.x - m.position.x);
             const angleToTargetY = Math.atan2(targetPosWithLead.y - m.position.y, Math.sqrt((targetPosWithLead.x - m.position.x)**2 + (targetPosWithLead.z - m.position.z)**2));
             m.position.x += Math.cos(angleToTarget) * speed; m.position.z += Math.sin(angleToTarget) * speed; m.position.y += Math.sin(angleToTargetY) * speed;
-            if(minDistance < PLAYER_COLLISION_RADIUS) { destroyed = true; }
+            if(minDistance < PLAYER_COLLISION_RADIUS) destroyed = true;
         }
         if(m.lifespan <= 0) destroyed = true;
         if(destroyed) {
@@ -543,9 +576,7 @@ function gameLoop() {
                     const impulseFalloff = Math.max(0, 1 - (dist / m.blastRadius));
                     const impulseDirection = { x: player.position.x - m.position.x, z: player.position.z - m.position.z, y: 0 };
                     const len = Math.sqrt(impulseDirection.x**2 + impulseDirection.z**2) || 1;
-                    impulseDirection.x /= len;
-                    impulseDirection.z /= len;
-
+                    impulseDirection.x /= len; impulseDirection.z /= len;
                     handleDamage(player, m.damage * damageFalloff, m.ownerId, impulseDirection, m.impulse * impulseFalloff, m.position);
                 }
             }
@@ -560,9 +591,7 @@ function gameLoop() {
             if(dist < 3) { 
                 const impulseDirection = {x: player.position.x - mine.position.x, z: player.position.z - mine.position.z, y: 0};
                 const len = Math.sqrt(impulseDirection.x**2 + impulseDirection.z**2) || 1;
-                impulseDirection.x /= len;
-                impulseDirection.z /= len;
-
+                impulseDirection.x /= len; impulseDirection.z /= len;
                 handleDamage(player, 50, mine.ownerId, impulseDirection, 40, mine.position); 
                 delete gameState.mines[mineId]; 
                 io.emit('objectDestroyed', {type: 'mine', id: mineId, hit: true}); 
@@ -570,7 +599,23 @@ function gameLoop() {
             }
         }
     }
-     for (let id in gameState.smokeClouds) {
+
+    const trackKeys = Object.keys(gameState.tracks);
+    if(trackKeys.length > MAX_TRACKS) {
+        const oldestTrackId = trackKeys[0]; // Prosta implementacja FIFO
+        delete gameState.tracks[oldestTrackId];
+        io.emit('objectDestroyed', { type: 'track', id: oldestTrackId });
+    }
+
+    for (let id in gameState.tracks) {
+        gameState.tracks[id].lifespan -= delta;
+        if (gameState.tracks[id].lifespan <= 0) {
+            delete gameState.tracks[id];
+            io.emit('objectDestroyed', { type: 'track', id: id });
+        }
+    }
+
+    for (let id in gameState.smokeClouds) {
         gameState.smokeClouds[id].lifespan -= delta;
         if (gameState.smokeClouds[id].lifespan <= 0) {
             delete gameState.smokeClouds[id];
@@ -579,7 +624,7 @@ function gameLoop() {
     }
     for(const id in gameState.players) {
         const player = gameState.players[id];
-        if (player.powerUpTimer > 0) { player.powerUpTimer -= delta; if (player.powerUpTimer <= 0) { deactivatePowerUp(id); } }
+        if (player.powerUpTimer > 0) { player.powerUpTimer -= delta; if (player.powerUpTimer <= 0) deactivatePowerUp(id); }
     }
   
     if (Object.keys(gameState.crates).length < 3) {
@@ -620,13 +665,13 @@ function checkPlayerBuildingCollision(player) {
     const playerRadius = 3.5;
     for (const buildingId in gameState.buildings) {
         const building = gameState.buildings[buildingId]; const { position: bPos, dimensions: bDim } = building;
-        if (player.position.x + playerRadius < bPos.x - bDim.x / 2 || player.position.x - playerRadius > bPos.x + bDim.x / 2 || player.position.z + playerRadius < bPos.z - bDim.z / 2 || player.position.z - playerRadius > bPos.z + bDim.z / 2) { continue; }
+        if (player.position.x + playerRadius < bPos.x - bDim.x / 2 || player.position.x - playerRadius > bPos.x + bDim.x / 2 || player.position.z + playerRadius < bPos.z - bDim.z / 2 || player.position.z - playerRadius > bPos.z + bDim.z / 2) continue;
         let minBuildingHeight = Infinity;
         const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }];
         corners.forEach(c => { const h = getHeightAt(c.x, c.z); if(h < minBuildingHeight) minBuildingHeight = h; });
         const playerAABB = { minY: player.position.y - TANKS_DATA[player.tankType].startY, maxY: player.position.y - TANKS_DATA[player.tankType].startY + PLAYER_HEIGHT };
         const buildingAABB = { minY: minBuildingHeight, maxY: minBuildingHeight + bDim.y };
-        if (playerAABB.maxY < buildingAABB.minY || playerAABB.minY > buildingAABB.maxY) { continue; }
+        if (playerAABB.maxY < buildingAABB.minY || playerAABB.minY > buildingAABB.maxY) continue;
         return true;
     }
     return false;
@@ -634,11 +679,11 @@ function checkPlayerBuildingCollision(player) {
 function checkProjectileBuildingCollision(projectile, buildings) {
     for (const building of buildings) {
         const { position: bPos, dimensions: bDim } = building;
-        if (projectile.position.x < bPos.x - bDim.x / 2 || projectile.position.x > bPos.x + bDim.x / 2 || projectile.position.z < bPos.z - bDim.z / 2 || projectile.position.z > bPos.z + bDim.z / 2) { continue; }
+        if (projectile.position.x < bPos.x - bDim.x / 2 || projectile.position.x > bPos.x + bDim.x / 2 || projectile.position.z < bPos.z - bDim.z / 2 || projectile.position.z > bPos.z + bDim.z / 2) continue;
         let minBuildingHeight = Infinity;
         const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }];
         corners.forEach(c => { const h = getHeightAt(c.x, c.z); if(h < minBuildingHeight) minBuildingHeight = h; });
-        if (projectile.position.y < minBuildingHeight || projectile.position.y > minBuildingHeight + bDim.y) { continue; }
+        if (projectile.position.y < minBuildingHeight || projectile.position.y > minBuildingHeight + bDim.y) continue;
 
         if (projectile.weaponId === 'he' || projectile.weaponId === 'heat' || projectile.weaponId === 'guided') {
             const impactPoint = { ...projectile.position }; const destroyedBrickIndices = []; const destructionRadius = 2.5;
@@ -651,7 +696,7 @@ function checkProjectileBuildingCollision(projectile, buildings) {
                     if (distSq < destructionRadius**2) { building.bricks[i] = null; destroyedBrickIndices.push(i); }
                 }
             }
-            if (destroyedBrickIndices.length > 0) { io.emit('buildingDamaged', { buildingId: building.id, destroyedBrickIndices, impactPoint }); }
+            if (destroyedBrickIndices.length > 0) io.emit('buildingDamaged', { buildingId: building.id, destroyedBrickIndices, impactPoint });
         }
         return true;
     }
@@ -726,6 +771,7 @@ io.on("connection", (socket) => {
       medkits: 3, score: 0, isDestroyed: false, respawnTimer: 0, keys: {},
       isSinking: false, sinkingTimer: 0, sinkingAngle: { x: 0, z: 0 },
       impulse: { x: 0, y: 0, z: 0 },
+      lastTrackPos: { ...startPos },
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
       isEmpDisabled: false, empDisableTimer: 0,
       currentWeapon: 'he',
