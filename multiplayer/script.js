@@ -35,8 +35,7 @@ const mouseDelta = new THREE.Vector2();
 // === Pomocnicze wektory dla kamery snajperskiej ===
 const sniperCameraPosition = new THREE.Vector3();
 const sniperLookAtTarget = new THREE.Vector3();
-const sniperTurretQuaternion = new THREE.Quaternion();
-const sniperCameraOffset = new THREE.Vector3(0, 0.4, -0.8); // X, Y (góra), Z (tył) - offset od punktu obrotu lufy
+const sniperLaserEndPoint = new THREE.Vector3();
 
 
 const keys = {};
@@ -142,7 +141,6 @@ function createTrackMarkTexture(type) {
     const canvas = document.createElement("canvas");
     canvas.width = 32; canvas.height = 64;
     const ctx = canvas.getContext("2d");
-
     const color = (type === 'sand' || type === 'mud') 
         ? 'rgba(100, 80, 60, 0.25)'
         : 'rgba(80, 55, 35, 0.35)';
@@ -601,6 +599,7 @@ function setupEventListeners() {
             isSniperModeActive = true;
             sniperOverlay.style.display = 'block';
             hudElements.forEach(el => el.style.opacity = '0.2');
+            document.body.classList.remove('crosshair-cursor');
         } else {
             isSniperModeActive = false;
             sniperZoomLevel = SNIPER_MIN_ZOOM;
@@ -608,6 +607,7 @@ function setupEventListeners() {
             camera.updateProjectionMatrix();
             sniperOverlay.style.display = 'none';
             hudElements.forEach(el => el.style.opacity = '1');
+            document.body.classList.add('crosshair-cursor');
         }
     });
 
@@ -745,6 +745,8 @@ function updateTerrainMesh(data) {
 function animate() {
     if (!isGameStarted) return; requestAnimationFrame(animate);
     const delta = clock.getDelta();
+    const localPlayerMesh = gameObjects.players[localPlayerId];
+
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
     socket.emit("playerInput", keys);
@@ -792,13 +794,34 @@ function animate() {
                 }
             }
             if (clientTank.laserSight && serverPlayer.laserData) {
-                const laser = clientTank.laserSight; const data = serverPlayer.laserData;
-                const isVisible = data.enabled && !serverPlayer.isDestroyed && !serverPlayer.isSinking && !isSniperModeActive;
-                laser.visible = isVisible;
-                if (isVisible) {
+                const laser = clientTank.laserSight;
+                laser.visible = serverPlayer.laserData.enabled && !serverPlayer.isDestroyed && !serverPlayer.isSinking;
+                
+                if (laser.visible) {
                     const positions = laser.geometry.attributes.position.array;
-                    positions[0] = data.start.x; positions[1] = data.start.y; positions[2] = data.start.z;
-                    positions[3] = data.end.x; positions[4] = data.end.y; positions[5] = data.end.z;
+                    if (isSniperModeActive && id === localPlayerId) {
+                        raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+                        const intersects = raycaster.intersectObjects(aimables, true);
+                        const endPoint = intersects.length > 0 ? intersects[0].point : raycaster.ray.at(10000, sniperLaserEndPoint); // <-- POPRAWKA TUTAJ
+                        
+                        const startPoint = new THREE.Vector3();
+                        localPlayerMesh.barrel.getWorldPosition(startPoint);
+                        
+                        positions[0] = startPoint.x;
+                        positions[1] = startPoint.y;
+                        positions[2] = startPoint.z;
+                        positions[3] = endPoint.x;
+                        positions[4] = endPoint.y;
+                        positions[5] = endPoint.z;
+                    } else {
+                        const data = serverPlayer.laserData;
+                        positions[0] = data.start.x;
+                        positions[1] = data.start.y;
+                        positions[2] = data.start.z;
+                        positions[3] = data.end.x;
+                        positions[4] = data.end.y;
+                        positions[5] = data.end.z;
+                    }
                     laser.geometry.attributes.position.needsUpdate = true;
                 }
             }
@@ -899,7 +922,7 @@ function animate() {
             bubble.style.left = `${x}px`; bubble.style.top = `${y}px`;
         }
     }
-    const localPlayerMesh = gameObjects.players[localPlayerId];
+    
     if (localPlayerMesh) {
         const localPlayerState = clientGameState.players[localPlayerId];
         
@@ -937,24 +960,16 @@ function animate() {
         mouseDelta.set(0, 0);
 
         if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
-            // Pozycja bazowa: punkt obrotu lufy (mantlet)
-            localPlayerMesh.mantlet.getWorldPosition(sniperCameraPosition);
-            // Rotacja wieży
-            localPlayerMesh.turret.getWorldQuaternion(sniperTurretQuaternion);
+            const barrel = localPlayerMesh.barrel;
+            const targetCameraPosition = new THREE.Vector3(0, 0, 0.5); 
+            barrel.localToWorld(targetCameraPosition);
+            
+            const lookAtTarget = new THREE.Vector3(0, 0, 100); 
+            barrel.localToWorld(lookAtTarget);
+            
+            camera.position.lerp(targetCameraPosition, 0.7);
+            camera.lookAt(lookAtTarget);
 
-            // Oblicz przesunięcie kamery w oparciu o rotację wieży
-            const offset = sniperCameraOffset.clone().applyQuaternion(sniperTurretQuaternion);
-            const targetCameraPosition = sniperCameraPosition.add(offset);
-            
-            // Punkt, na który patrzy kamera (daleko przed lufą)
-            localPlayerMesh.barrel.getWorldPosition(sniperLookAtTarget).add(
-                new THREE.Vector3(0, 0, 100).applyQuaternion(localPlayerMesh.barrel.getWorldQuaternion(new THREE.Quaternion()))
-            );
-            
-            // Płynne przejście i ustawienie kamery
-            camera.position.lerp(targetCameraPosition, 0.4);
-            camera.lookAt(sniperLookAtTarget);
-            
         } else if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
             const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
             camera.position.lerp(dronePosition, 0.05); 
