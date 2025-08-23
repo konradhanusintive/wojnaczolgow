@@ -346,3 +346,53 @@ canvas {
   85% { opacity: 1; transform: translateX(0); }
   100% { opacity: 0; transform: translateX(100%); }
 }
+
+/* --- STYLE TRYBU SNAJPERSKIEGO --- */
+#sniper-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: none; /* Ukryty domyślnie */
+  pointer-events: none; /* Pozwala na klikanie "przez" nakładkę */
+  z-index: 90;
+  /* Efekt winiety (przyciemnione krawędzie) */
+  box-shadow: inset 0 0 20vw 10vw black;
+}
+
+#sniper-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px; /* Grubość linii celownika */
+  height: 2px;
+  transform: translate(-50%, -50%);
+  background-color: transparent; /* Środek jest pusty */
+}
+
+/* Linie celownika (pionowa i pozioma) */
+#sniper-reticle::before, #sniper-reticle::after {
+  content: '';
+  position: absolute;
+  background-color: rgba(255, 0, 0, 0.7);
+  box-shadow: 0 0 5px rgba(255, 0, 0, 0.8);
+}
+
+/* Linia pionowa */
+#sniper-reticle::before {
+  width: 2px;
+  height: 150px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Linia pozioma */
+#sniper-reticle::after {
+  width: 150px;
+  height: 2px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}

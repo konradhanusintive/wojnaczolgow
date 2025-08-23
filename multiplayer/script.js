@@ -24,6 +24,13 @@ const mouse = new THREE.Vector2();
 const targetPoint = new THREE.Vector3();
 const aimables = []; 
 
+// === ZMIENNE DLA TRYBU SNAJPERSKIEGO ===
+let isSniperModeActive = false;
+let sniperZoomLevel = 1.0;
+const SNIPER_MIN_ZOOM = 1.0;
+const SNIPER_MAX_ZOOM = 10.0;
+const BASE_FOV = 75; 
+
 const keys = {};
 let canFire = true;
 let fireCooldown = 0.5;
@@ -123,31 +130,26 @@ function getHeightAt(x, z) {
     const tx = gridX - x1; const tz = gridZ - z1; const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx; return h_x1 * (1 - tz) + h_x2 * tz;
 }
 
-// ====================================================================
-// === ZMODYFIKOWANA FUNKCJA TWORZENIA TEKSTURY ŚLADÓW GĄSIENIC ===
-// ====================================================================
 function createTrackMarkTexture(type) {
     const canvas = document.createElement("canvas");
     canvas.width = 32; canvas.height = 64;
     const ctx = canvas.getContext("2d");
 
-    // Zwiększone krycie i dostosowane kolory dla lepszej widoczności
     const color = (type === 'sand' || type === 'mud') 
-        ? 'rgba(100, 80, 60, 0.25)' // Ciemniejszy piasek, 25% krycia
-        : 'rgba(80, 55, 35, 0.35)'; // Błoto, 35% krycia
+        ? 'rgba(100, 80, 60, 0.25)'
+        : 'rgba(80, 55, 35, 0.35)';
 
     const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
     const transparent = 'rgba(0,0,0,0)';
     gradient.addColorStop(0, transparent);
-    gradient.addColorStop(0.15, color); // Szybsze dojście do pełnego koloru
-    gradient.addColorStop(0.85, color); // Dłuższe utrzymanie koloru
+    gradient.addColorStop(0.15, color);
+    gradient.addColorStop(0.85, color);
     gradient.addColorStop(1, transparent);
     
     ctx.fillStyle = gradient;
 
-    // Grubsze i gęstsze ślady
-    for (let i = 2; i < canvas.height; i += 8) { // Mniejsza przerwa
-        ctx.fillRect(0, i, canvas.width, 4); // Grubszy ślad
+    for (let i = 2; i < canvas.height; i += 8) {
+        ctx.fillRect(0, i, canvas.width, 4);
     }
     return new THREE.CanvasTexture(canvas);
 }
@@ -477,7 +479,7 @@ function initGame(payload) {
     renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); 
     renderer.shadowMap.enabled = true; document.body.appendChild(renderer.domElement);
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87CEEB); scene.fog = new THREE.Fog(0x87CEEB, 2000, 15000); 
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000); clock = new THREE.Clock();
+    camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 20000); clock = new THREE.Clock();
     createSkydomeBackground(scene);
     scene.add(new THREE.AmbientLight(0xffffff, 1.0));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); dirLight.position.set(100, 80, 50); dirLight.castShadow = true;
@@ -551,7 +553,38 @@ function setupEventListeners() {
     });
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
     document.addEventListener('mousemove', (e) => { if (isGameStarted) { mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = - (e.clientY / window.innerHeight) * 2 + 1; } });
-    document.addEventListener('mousedown', (e) => { if(isGameStarted && e.button === 0) { handleFireInput(); } });
+    
+    document.addEventListener('mousedown', (e) => {
+        if (!isGameStarted) return;
+        if (e.button === 0) { handleFireInput(); }
+        if (e.button === 2) { 
+            isSniperModeActive = true;
+            document.getElementById('sniper-overlay').style.display = 'block';
+        }
+    });
+    document.addEventListener('mouseup', (e) => {
+        if (!isGameStarted) return;
+        if (e.button === 2) {
+            isSniperModeActive = false;
+            sniperZoomLevel = SNIPER_MIN_ZOOM;
+            camera.fov = BASE_FOV;
+            camera.updateProjectionMatrix();
+            document.getElementById('sniper-overlay').style.display = 'none';
+        }
+    });
+    document.addEventListener('wheel', (e) => {
+        if (!isGameStarted || !isSniperModeActive) return;
+        
+        if (e.deltaY < 0) {
+            sniperZoomLevel = Math.min(SNIPER_MAX_ZOOM, sniperZoomLevel * 1.25);
+        } else {
+            sniperZoomLevel = Math.max(SNIPER_MIN_ZOOM, sniperZoomLevel / 1.25);
+        }
+        
+        camera.fov = BASE_FOV / sniperZoomLevel;
+        camera.updateProjectionMatrix();
+    });
+
     document.addEventListener('contextmenu', e => e.preventDefault());
 }
 
@@ -850,7 +883,16 @@ function animate() {
             socket.emit('laserUpdate', { start: barrelWorldPos, end: targetPoint });
         }
         
-        if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
+        if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
+            const targetSniperPosition = new THREE.Vector3();
+            const targetSniperQuaternion = new THREE.Quaternion();
+            localPlayerMesh.mantlet.getWorldPosition(targetSniperPosition);
+            localPlayerMesh.barrel.getWorldQuaternion(targetSniperQuaternion);
+
+            camera.position.lerp(targetSniperPosition, 0.2);
+            camera.quaternion.slerp(targetSniperQuaternion, 0.2);
+            
+        } else if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
             const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
             camera.position.lerp(dronePosition, 0.05); camera.lookAt(localPlayerMesh.position);
         } else if (localPlayerState) {
