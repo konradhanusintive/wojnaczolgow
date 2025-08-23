@@ -11,7 +11,7 @@ let isGameStarted = false;
 let isSelectionScreenActive = false;
 let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial;
-let craterMaterial, sandTrackMaterial, grassTrackMaterial;
+let sandTrackMaterial, grassTrackMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 
@@ -42,6 +42,7 @@ const gameObjects = {
     wreckage: [],
     smokeParticles: [], 
     tracks: {},
+    craters: {}
 };
 
 const socket = io();
@@ -122,27 +123,32 @@ function getHeightAt(x, z) {
     const tx = gridX - x1; const tz = gridZ - z1; const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx; return h_x1 * (1 - tz) + h_x2 * tz;
 }
 
-function createCraterTexture() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 128; canvas.height = 128;
-    const ctx = canvas.getContext("2d");
-    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0, "rgba(20, 10, 5, 0.8)");
-    gradient.addColorStop(0.7, "rgba(40, 20, 10, 0.6)");
-    gradient.addColorStop(1, "rgba(50, 30, 20, 0)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 128, 128);
-    return new THREE.CanvasTexture(canvas);
-}
-
+// ====================================================================
+// === ZMODYFIKOWANA FUNKCJA TWORZENIA TEKSTURY ŚLADÓW GĄSIENIC ===
+// ====================================================================
 function createTrackMarkTexture(type) {
     const canvas = document.createElement("canvas");
     canvas.width = 32; canvas.height = 64;
     const ctx = canvas.getContext("2d");
-    const color = (type === 'sand' || type === 'mud') ? 'rgba(0, 0, 0, 0.15)' : 'rgba(82, 62, 43, 0.25)';
-    ctx.fillStyle = color;
-    for (let i = 0; i < canvas.height; i += 8) {
-        ctx.fillRect(0, i, canvas.width, 4);
+
+    // Lżejsze, bardziej naturalne kolory z niską przezroczystością
+    const color = (type === 'sand' || type === 'mud') 
+        ? 'rgba(139, 125, 107, 0.12)' // Ciemniejszy, przybrudzony piasek
+        : 'rgba(101, 67, 33, 0.18)';    // Jasny brąz/błoto
+
+    // Tworzenie gradientu, aby krawędzie były przezroczyste
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    const transparent = 'rgba(0,0,0,0)';
+    gradient.addColorStop(0, transparent);
+    gradient.addColorStop(0.2, color);
+    gradient.addColorStop(0.8, color);
+    gradient.addColorStop(1, transparent);
+    
+    ctx.fillStyle = gradient;
+
+    // Rysowanie cieńszych śladów
+    for (let i = 0; i < canvas.height; i += 9) { // Zwiększona przerwa
+        ctx.fillRect(0, i, canvas.width, 3); // Cieńszy ślad
     }
     return new THREE.CanvasTexture(canvas);
 }
@@ -308,7 +314,7 @@ function createEMPTankEffect(tankMesh) {
     const effect = {
         mesh: effectMesh,
         target: tankMesh,
-        lifespan: 0.2, // Krótki czas życia, będzie resetowany w pętli animacji
+        lifespan: 0.2,
     };
     gameObjects.particles.push(effect);
     scene.add(effectMesh);
@@ -334,7 +340,7 @@ function createSmokeCloud(position, radius, duration) {
         cloud.particles.push(p);
         scene.add(p.mesh);
     }
-    gameObjects.smokeClouds[Date.now()] = cloud; // Używamy timestamp jako ID
+    gameObjects.smokeClouds[Date.now()] = cloud;
 }
 
 // --- LOGIKA UI ---
@@ -501,13 +507,12 @@ function initGame(payload) {
     cloudSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0xcccccc, depthWrite: false, opacity: 0.8 });
     muzzleFlashMaterial = new THREE.SpriteMaterial({ map: createMuzzleFlashTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     
-    sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false, blending: THREE.MultiplyBlending });
-    grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false, blending: THREE.MultiplyBlending });
+    sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
+    grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
 
     reconcileGameState(clientGameState); setupEventListeners(); animate();
     setInterval(() => { if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed && !clientGameState.players[localPlayerId].isSinking) { if (Math.random() > 0.6) showTankQuote(localPlayerId); } }, 15000 + Math.random() * 5000);
 }
-// ... (reszta pliku script.js - bez zmian)
 function handleFireInput() {
     if (!canFire || !localPlayerId || !clientGameState.players[localPlayerId] || clientGameState.players[localPlayerId].isDestroyed) return;
 
@@ -632,6 +637,7 @@ function createObjectMesh(payload) {
     }
 }
 
+// ... (reszta kodu bez zmian, aż do `socket.on('terrainDeformed',...)`)
 function updateTerrainMesh(data) {
     if (!terrainMesh) return;
 
@@ -642,28 +648,26 @@ function updateTerrainMesh(data) {
 
     const vertices = terrainMesh.geometry.attributes.position.array;
 
-    const startX = Math.max(0, Math.floor(((position.x - radius) + size / 2) / step));
-    const endX = Math.min(segments, Math.ceil(((position.x + radius) + size / 2) / step));
-    const startZ = Math.max(0, Math.floor(((position.z - radius) + size / 2) / step));
-    const endZ = Math.min(segments, Math.ceil(((position.z + radius) + size / 2) / step));
+    const startX_grid = Math.max(0, Math.floor(((position.x - radius) + size / 2) / step));
+    const endX_grid = Math.min(segments, Math.ceil(((position.x + radius) + size / 2) / step));
+    const startZ_grid = Math.max(0, Math.floor(((position.z - radius) + size / 2) / step));
+    const endZ_grid = Math.min(segments, Math.ceil(((position.z + radius) + size / 2) / step));
 
-    for (let i = startX; i <= endX; i++) {
-        for (let j = startZ; j <= endZ; j++) {
+    for (let j = startZ_grid; j <= endZ_grid; j++) { // Iteruj po Z (wiersze)
+        for (let i = startX_grid; i <= endX_grid; i++) { // Iteruj po X (kolumny)
             const Px = i * step - size / 2;
             const Pz = j * step - size / 2;
             const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
 
             if (distSq < radiusSq) {
                 const dist = Math.sqrt(distSq);
-                const depression = depth * (1 - (dist / radius));
+                const depression = depth * (0.5 * (Math.cos(dist / radius * Math.PI) + 1));
                 
-                // Aktualizuj lokalną mapę wysokości
                 if (heightMap[i] && heightMap[i][j] !== undefined) {
                     heightMap[i][j] -= depression;
                 }
                 
-                // Aktualizuj wierzchołek siatki
-                const vertexIndex = (j * (segments + 1) + i) * 3 + 2; // +2 to a Z (which is Y in PlaneGeometry)
+                const vertexIndex = (j * (segments + 1) + i) * 3 + 2;
                 vertices[vertexIndex] -= depression;
             }
         }
@@ -766,9 +770,9 @@ function animate() {
     for (const id in gameObjects.tracks) {
         const track = gameObjects.tracks[id];
         const serverTrack = clientGameState.tracks ? clientGameState.tracks[id] : null;
-        if (track && serverTrack) {
+        if (track && serverTrack && track.initialLifespan) { // Upewnij się, że initialLifespan istnieje
             const lifePercent = Math.max(0, serverTrack.lifespan / track.initialLifespan);
-            track.mesh.material.opacity = lifePercent * 0.8;
+            track.mesh.material.opacity = lifePercent;
         }
     }
 
@@ -804,7 +808,7 @@ function animate() {
             const lifePercent = cloud.lifespan / cloud.initialLifespan;
             cloud.particles.forEach(p => {
                 p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
-                const currentScale = p.startSize * (1 - Math.abs(lifePercent - 0.5) * 2); // grow and shrink
+                const currentScale = p.startSize * (1 - Math.abs(lifePercent - 0.5) * 2);
                 p.mesh.scale.set(currentScale, currentScale, currentScale);
                 p.mesh.material.opacity = Math.min(0.8, lifePercent * 2);
                 p.mesh.lookAt(camera.position);
