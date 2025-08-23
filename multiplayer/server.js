@@ -72,14 +72,12 @@ const gameState = {
   missiles: {},
   machineGunBullets: {},
   tracks: {},
-  craters: {}
 };
 
 let nextObjectId = 0;
 let crateSpawnTimer = 10.0;
 let ammoCrateSpawnTimer = 15.0;
 
-// --- Implementacja szumu Perlina ---
 const PerlinNoise = new (function() {
     this.p = new Uint8Array(512);
     this.init = function(seed) {
@@ -116,7 +114,6 @@ const PerlinNoise = new (function() {
     };
 })();
 
-// --- Funkcje do obsługi terenu ---
 function generateHeightMap() {
     PerlinNoise.init(Math.random());
     console.log(`Generowanie mapy (${MAP_SIZE}x${MAP_SIZE}) z amplitudą: ${TERRAIN_AMPLITUDE}, skalą: ${TERRAIN_SCALE}`);
@@ -175,7 +172,33 @@ function getTerrainTypeAt(x, z) {
     return 'grass';
 }
 
-// --- Logika Pomocnicza ---
+function applyDeformation(data) {
+    const { position, radius, depth } = data;
+    const radiusSq = radius * radius;
+    const step = MAP_SIZE / TERRAIN_SEGMENTS;
+
+    const startX = Math.max(0, Math.floor(((position.x - radius) + MAP_SIZE / 2) / step));
+    const endX = Math.min(TERRAIN_SEGMENTS, Math.ceil(((position.x + radius) + MAP_SIZE / 2) / step));
+    const startZ = Math.max(0, Math.floor(((position.z - radius) + MAP_SIZE / 2) / step));
+    const endZ = Math.min(TERRAIN_SEGMENTS, Math.ceil(((position.z + radius) + MAP_SIZE / 2) / step));
+
+    for (let i = startX; i <= endX; i++) {
+        for (let j = startZ; j <= endZ; j++) {
+            const Px = i * step - MAP_SIZE / 2;
+            const Pz = j * step - MAP_SIZE / 2;
+            const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
+
+            if (distSq < radiusSq) {
+                const dist = Math.sqrt(distSq);
+                const depression = depth * (0.5 * (Math.cos(dist / radius * Math.PI) + 1)); // Płynne wgłębienie (cosine falloff)
+                if (heightMap[i] && heightMap[i][j] !== undefined) {
+                    heightMap[i][j] -= depression;
+                }
+            }
+        }
+    }
+}
+
 function handleDamage(player, amount, attackerId, impulseDirection = {x:0, y:0, z:0}, impulseMagnitude = 0, impactPoint = player.position) {
     if (!player || player.isDestroyed || player.isSinking) return;
     
@@ -205,7 +228,6 @@ function applyEMP(player, duration) {
     player.empDisableTimer = Math.max(player.empDisableTimer, duration);
 }
 
-// --- Logika Strzelania ---
 function fireWeapon(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.isReloading || player.isEmpDisabled) return;
@@ -315,7 +337,7 @@ function deactivatePowerUp(playerId) {
     const player = gameState.players[playerId];
     if (player) { player.activePowerUp = null; player.powerUpTimer = 0; player.powerUpAmmo = 0; }
 }
-// --- Główna pętla gry ---
+
 function gameLoop() {
     const delta = 1 / 30;
 
@@ -356,7 +378,6 @@ function gameLoop() {
         let moveSpeed = stats.speed * delta * (player.activePowerUp === 'turbo' ? 2.5 : 1);
         const rotateSpeed = stats.turretRot * delta;
 
-        const oldPos = { ...player.position };
         const moveVector = { x: 0, z: 0 };
 
         if (!player.isEmpDisabled) {
@@ -424,7 +445,6 @@ function gameLoop() {
             }
         }
 
-        // --- Tworzenie śladów gąsienic ---
         const distSq = (player.position.x - player.lastTrackPos.x)**2 + (player.position.z - player.lastTrackPos.z)**2;
         if (distSq > TRACK_DISTANCE_THRESHOLD**2) {
             const trackWidth = tankData.hullWidth / 2 - 0.5;
@@ -440,7 +460,7 @@ function gameLoop() {
                     id: trackId,
                     position: { x: pos.x, y: getHeightAt(pos.x, pos.z), z: pos.z },
                     rotationY: player.rotation.y,
-                    lifespan: 20.0, // 20 sekund życia
+                    lifespan: 20.0,
                     type: getTerrainTypeAt(pos.x, pos.z)
                 };
                 gameState.tracks[trackId] = track;
@@ -448,7 +468,6 @@ function gameLoop() {
             });
             player.lastTrackPos = { ...player.position };
         }
-
 
         for (const otherId in gameState.players) {
             if (id === otherId) continue; const otherPlayer = gameState.players[otherId]; if (otherPlayer.isDestroyed || otherPlayer.isSinking) continue;
@@ -497,20 +516,18 @@ function gameLoop() {
                     break; 
                 }
             }
-            if (destroyed) { /* Handled below */ }
+            if (destroyed) {}
             else if (checkProjectileBuildingCollision(p, Object.values(gameState.buildings))) { destroyed = true; }
             else if (getHeightAt(p.position.x, p.position.z) > p.position.y) {
                 destroyed = true;
-                // --- Tworzenie kraterów ---
                 if (p.weaponId === 'he') {
-                    const craterId = `crater_${nextObjectId++}`;
-                    const crater = {
-                        id: craterId,
-                        position: { x: p.position.x, y: getHeightAt(p.position.x, p.position.z), z: p.position.z },
-                        radius: 6 + Math.random() * 2
+                    const deformData = {
+                        position: { x: p.position.x, z: p.position.z },
+                        radius: 8 + Math.random() * 2,
+                        depth: 3.0 + Math.random()
                     };
-                    gameState.craters[craterId] = crater;
-                    io.emit('objectCreated', { type: 'crater', data: crater });
+                    applyDeformation(deformData);
+                    io.emit('terrainDeformed', deformData);
                 }
             }
             
@@ -602,11 +619,10 @@ function gameLoop() {
 
     const trackKeys = Object.keys(gameState.tracks);
     if(trackKeys.length > MAX_TRACKS) {
-        const oldestTrackId = trackKeys[0]; // Prosta implementacja FIFO
+        const oldestTrackId = trackKeys[0];
         delete gameState.tracks[oldestTrackId];
         io.emit('objectDestroyed', { type: 'track', id: oldestTrackId });
     }
-
     for (let id in gameState.tracks) {
         gameState.tracks[id].lifespan -= delta;
         if (gameState.tracks[id].lifespan <= 0) {
@@ -809,6 +825,7 @@ io.on("connection", (socket) => {
 
 app.use(express.static(path.join(__dirname)));
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
+app.get('/favicon.ico', (req, res) => res.status(204).send()); // Obsługa favicon.ico
 
 server.listen(PORT, () => {
   console.log(`Serwer nasłuchuje na porcie ${PORT}`);

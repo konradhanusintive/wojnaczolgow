@@ -42,7 +42,6 @@ const gameObjects = {
     wreckage: [],
     smokeParticles: [], 
     tracks: {},
-    craters: {}
 };
 
 const socket = io();
@@ -140,7 +139,7 @@ function createTrackMarkTexture(type) {
     const canvas = document.createElement("canvas");
     canvas.width = 32; canvas.height = 64;
     const ctx = canvas.getContext("2d");
-    const color = (type === 'sand') ? 'rgba(0, 0, 0, 0.15)' : 'rgba(82, 62, 43, 0.25)';
+    const color = (type === 'sand' || type === 'mud') ? 'rgba(0, 0, 0, 0.15)' : 'rgba(82, 62, 43, 0.25)';
     ctx.fillStyle = color;
     for (let i = 0; i < canvas.height; i += 8) {
         ctx.fillRect(0, i, canvas.width, 4);
@@ -339,6 +338,7 @@ function createSmokeCloud(position, radius, duration) {
 }
 
 // --- LOGIKA UI ---
+// ... (bez zmian)
 function initializeUI() {
     document.getElementById("intro-logo").addEventListener("animationend", () => {
         document.getElementById("intro-screen").style.display = "none"; document.getElementById("start-screen").style.display = "flex";
@@ -501,15 +501,13 @@ function initGame(payload) {
     cloudSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0xcccccc, depthWrite: false, opacity: 0.8 });
     muzzleFlashMaterial = new THREE.SpriteMaterial({ map: createMuzzleFlashTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     
-    // Materiały do śladów i kraterów
-    sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
-    grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
-    craterMaterial = new THREE.MeshBasicMaterial({ map: createCraterTexture(), transparent: true, depthWrite: false });
-
+    sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false, blending: THREE.MultiplyBlending });
+    grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false, blending: THREE.MultiplyBlending });
 
     reconcileGameState(clientGameState); setupEventListeners(); animate();
     setInterval(() => { if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed && !clientGameState.players[localPlayerId].isSinking) { if (Math.random() > 0.6) showTankQuote(localPlayerId); } }, 15000 + Math.random() * 5000);
 }
+// ... (reszta pliku script.js - bez zmian)
 function handleFireInput() {
     if (!canFire || !localPlayerId || !clientGameState.players[localPlayerId] || clientGameState.players[localPlayerId].isDestroyed) return;
 
@@ -573,7 +571,7 @@ function reconcileGameState(serverState) {
     const serverBuildingIds = Object.keys(serverState.buildings || {});
     for (const id of serverBuildingIds) { if (!gameObjects.buildings[id]) { createBuildingMesh(serverState.buildings[id]); } }
     
-    const objectTypes = ['crates', 'ammoCrates', 'tracks', 'craters'];
+    const objectTypes = ['crates', 'ammoCrates', 'tracks'];
     for (const type of objectTypes) {
         const pluralType = type.endsWith('s') ? type : type + 's';
         const serverObjectIds = Object.keys(serverState[pluralType] || {});
@@ -610,18 +608,14 @@ function createObjectMesh(payload) {
         case 'crate': newMesh = createSupplyCrate(); break;
         case 'ammoCrate': newMesh = createAmmoCrateMesh(); break;
         case 'track':
-            const trackMat = data.type === 'sand' ? sandTrackMaterial.clone() : grassTrackMaterial.clone();
-            newMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 3), trackMat);
+            const trackMat = (data.type === 'sand' || data.type === 'mud') ? sandTrackMaterial.clone() : grassTrackMaterial.clone();
+            newMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 4.0), trackMat);
             newMesh.rotation.x = -Math.PI / 2;
             newMesh.rotation.z = data.rotationY;
             break;
-        case 'crater':
-            newMesh = new THREE.Mesh(new THREE.CircleGeometry(data.radius, 32), craterMaterial.clone());
-            newMesh.rotation.x = -Math.PI / 2;
-            break;
     }
     if (newMesh) {
-        newMesh.position.set(data.position.x, data.position.y + (type === 'track' || type === 'crater' ? 0.06 : 0), data.position.z);
+        newMesh.position.set(data.position.x, data.position.y + (type === 'track' ? 0.06 : 0), data.position.z);
         if(data.rotationY && type !== 'track') newMesh.rotation.y = data.rotationY;
         
         container[data.id] = {
@@ -637,6 +631,48 @@ function createObjectMesh(payload) {
         scene.add(newMesh);
     }
 }
+
+function updateTerrainMesh(data) {
+    if (!terrainMesh) return;
+
+    const { position, radius, depth } = data;
+    const { size, segments } = terrainParams;
+    const radiusSq = radius * radius;
+    const step = size / segments;
+
+    const vertices = terrainMesh.geometry.attributes.position.array;
+
+    const startX = Math.max(0, Math.floor(((position.x - radius) + size / 2) / step));
+    const endX = Math.min(segments, Math.ceil(((position.x + radius) + size / 2) / step));
+    const startZ = Math.max(0, Math.floor(((position.z - radius) + size / 2) / step));
+    const endZ = Math.min(segments, Math.ceil(((position.z + radius) + size / 2) / step));
+
+    for (let i = startX; i <= endX; i++) {
+        for (let j = startZ; j <= endZ; j++) {
+            const Px = i * step - size / 2;
+            const Pz = j * step - size / 2;
+            const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
+
+            if (distSq < radiusSq) {
+                const dist = Math.sqrt(distSq);
+                const depression = depth * (1 - (dist / radius));
+                
+                // Aktualizuj lokalną mapę wysokości
+                if (heightMap[i] && heightMap[i][j] !== undefined) {
+                    heightMap[i][j] -= depression;
+                }
+                
+                // Aktualizuj wierzchołek siatki
+                const vertexIndex = (j * (segments + 1) + i) * 3 + 2; // +2 to a Z (which is Y in PlaneGeometry)
+                vertices[vertexIndex] -= depression;
+            }
+        }
+    }
+
+    terrainMesh.geometry.attributes.position.needsUpdate = true;
+    terrainMesh.geometry.computeVertexNormals();
+}
+
 
 function animate() {
     if (!isGameStarted) return; requestAnimationFrame(animate);
@@ -729,10 +765,10 @@ function animate() {
 
     for (const id in gameObjects.tracks) {
         const track = gameObjects.tracks[id];
-        if (track.lifespan !== undefined) {
-            track.lifespan -= delta;
-            const lifePercent = Math.max(0, track.lifespan / track.initialLifespan);
-            track.mesh.material.opacity = lifePercent * 0.8; // Znikaj płynnie
+        const serverTrack = clientGameState.tracks ? clientGameState.tracks[id] : null;
+        if (track && serverTrack) {
+            const lifePercent = Math.max(0, serverTrack.lifespan / track.initialLifespan);
+            track.mesh.material.opacity = lifePercent * 0.8;
         }
     }
 
@@ -931,6 +967,9 @@ socket.on('playerHit', (data) => {
     if (gameObjects.players[victimId]) {
         createHitEffect(new THREE.Vector3(impactPoint.x, impactPoint.y, impactPoint.z), new THREE.Vector3(impulse.x, impulse.y, impulse.z));
     }
+});
+socket.on('terrainDeformed', (data) => {
+    updateTerrainMesh(data);
 });
 
 // --- START APLIKACJI ---
