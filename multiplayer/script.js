@@ -375,11 +375,11 @@ class TankSelectionManager {
             scene.add(dirLight);
 
             const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa));
-            tankMesh.scale.set(0.2, 0.2, 0.2);
-            tankMesh.position.y = -1.5;
+            tankMesh.scale.set(0.6, 0.6, 0.6); // ZWIĘKSZONA SKALA
+            tankMesh.position.y = -2.5; // Dopasowana pozycja
             scene.add(tankMesh);
 
-            camera.position.z = 5;
+            camera.position.z = 8; // Odsunięta kamera
 
             const target = {
                 canvas, scene, camera, renderer, tankMesh,
@@ -418,7 +418,7 @@ class TankSelectionManager {
             e.preventDefault();
             const zoomSpeed = 0.5;
             camera.position.z += e.deltaY > 0 ? zoomSpeed : -zoomSpeed;
-            camera.position.z = Math.max(3, Math.min(8, camera.position.z)); // Ograniczenie zoomu
+            camera.position.z = Math.max(5, Math.min(12, camera.position.z)); // Zaktualizowany zakres zoomu
         });
     }
 
@@ -453,8 +453,16 @@ class TankSelectionManager {
             // Tutaj można dodać usuwanie event listenerów, jeśli to konieczne
             target.renderer.dispose();
             target.scene.traverse(obj => {
-                if (obj.geometry) obj.geometry.dispose();
-                if (obj.material) obj.material.dispose();
+                if(obj.isMesh){
+                    if (obj.geometry) obj.geometry.dispose();
+                    if (obj.material) {
+                        if (Array.isArray(obj.material)) {
+                            obj.material.forEach(mat => mat.dispose());
+                        } else {
+                            obj.material.dispose();
+                        }
+                    }
+                }
             });
         });
         this.renderTargets = [];
@@ -1082,14 +1090,21 @@ function animate() {
         mouseDelta.set(0, 0);
 
         if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
+            // Get the world position of the barrel tip for the camera's location
             localPlayerMesh.barrelTip.getWorldPosition(sniperCameraPosition);
+    
+            // Calculate the forward direction vector in world space
+            const forwardVector = new THREE.Vector3(0, 0, 1);
+            const worldQuaternion = new THREE.Quaternion();
+            localPlayerMesh.barrelTip.getWorldQuaternion(worldQuaternion);
+            forwardVector.applyQuaternion(worldQuaternion);
+    
+            // Calculate the point to look at
+            const lookAtTargetPoint = sniperCameraPosition.clone().add(forwardVector.multiplyScalar(100));
             
-            const lookAtTarget = new THREE.Vector3(0, 0, 100); 
-            localPlayerMesh.barrelTip.localToWorld(lookAtTarget);
-            
+            // Position the camera and make it look at the target point
             camera.position.lerp(sniperCameraPosition, 0.7);
-            camera.lookAt(lookAtTarget);
-
+            camera.lookAt(lookAtTargetPoint);
         } else if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
             const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
             camera.position.lerp(dronePosition, 0.05); 
