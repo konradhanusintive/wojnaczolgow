@@ -9,6 +9,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // --- Konfiguracja i stałe gry ---
+const IS_DEV_MODE = true; // <-- FEATURE FLAG DLA TRYBU DEWELOPERSKIEGO
 const PORT = process.env.PORT || 3000;
 const POWERUP_TYPES = ["turbo", "machinegun", "mines"]; 
 const PLAYER_COLLISION_RADIUS = 7;
@@ -72,14 +73,13 @@ const gameState = {
   missiles: {},
   machineGunBullets: {},
   tracks: {},
-  craters: {}
+  fires: {}, // Nowy stan do zarządzania ogniem
 };
 
 let nextObjectId = 0;
 let crateSpawnTimer = 10.0;
 let ammoCrateSpawnTimer = 15.0;
 
-// --- Implementacja szumu Perlina ---
 const PerlinNoise = new (function() {
     this.p = new Uint8Array(512);
     this.init = function(seed) {
@@ -116,7 +116,6 @@ const PerlinNoise = new (function() {
     };
 })();
 
-// --- Funkcje do obsługi terenu ---
 function generateHeightMap() {
     PerlinNoise.init(Math.random());
     console.log(`Generowanie mapy (${MAP_SIZE}x${MAP_SIZE}) z amplitudą: ${TERRAIN_AMPLITUDE}, skalą: ${TERRAIN_SCALE}`);
@@ -154,6 +153,7 @@ function generateHeightMap() {
     }
 }
 function lerp(a, b, t) { return a + (b - a) * t; }
+
 function getHeightAt(x, z) {
     if (!heightMap || heightMap.length === 0) return 0;
     const gridX = (x + MAP_SIZE / 2) / MAP_SIZE * TERRAIN_SEGMENTS;
@@ -175,7 +175,33 @@ function getTerrainTypeAt(x, z) {
     return 'grass';
 }
 
-// --- Logika Pomocnicza ---
+function applyDeformation(data) {
+    const { position, radius, depth } = data;
+    const radiusSq = radius * radius;
+    const step = MAP_SIZE / TERRAIN_SEGMENTS;
+
+    const startX = Math.max(0, Math.floor(((position.x - radius) + MAP_SIZE / 2) / step));
+    const endX = Math.min(TERRAIN_SEGMENTS, Math.ceil(((position.x + radius) + MAP_SIZE / 2) / step));
+    const startZ = Math.max(0, Math.floor(((position.z - radius) + MAP_SIZE / 2) / step));
+    const endZ = Math.min(TERRAIN_SEGMENTS, Math.ceil(((position.z + radius) + MAP_SIZE / 2) / step));
+
+    for (let i = startX; i <= endX; i++) {
+        for (let j = startZ; j <= endZ; j++) {
+            const Px = i * step - MAP_SIZE / 2;
+            const Pz = j * step - MAP_SIZE / 2;
+            const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
+
+            if (distSq < radiusSq) {
+                const dist = Math.sqrt(distSq);
+                const depression = depth * (0.5 * (Math.cos(dist / radius * Math.PI) + 1)); // Płynne wgłębienie (cosine falloff)
+                if (heightMap[i] && heightMap[i][j] !== undefined) {
+                    heightMap[i][j] -= depression;
+                }
+            }
+        }
+    }
+}
+
 function handleDamage(player, amount, attackerId, impulseDirection = {x:0, y:0, z:0}, impulseMagnitude = 0, impactPoint = player.position) {
     if (!player || player.isDestroyed || player.isSinking) return;
     
@@ -205,7 +231,6 @@ function applyEMP(player, duration) {
     player.empDisableTimer = Math.max(player.empDisableTimer, duration);
 }
 
-// --- Logika Strzelania ---
 function fireWeapon(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.isReloading || player.isEmpDisabled) return;
@@ -315,7 +340,7 @@ function deactivatePowerUp(playerId) {
     const player = gameState.players[playerId];
     if (player) { player.activePowerUp = null; player.powerUpTimer = 0; player.powerUpAmmo = 0; }
 }
-// --- Główna pętla gry ---
+
 function gameLoop() {
     const delta = 1 / 30;
 
@@ -356,7 +381,6 @@ function gameLoop() {
         let moveSpeed = stats.speed * delta * (player.activePowerUp === 'turbo' ? 2.5 : 1);
         const rotateSpeed = stats.turretRot * delta;
 
-        const oldPos = { ...player.position };
         const moveVector = { x: 0, z: 0 };
 
         if (!player.isEmpDisabled) {
@@ -424,7 +448,6 @@ function gameLoop() {
             }
         }
 
-        // --- Tworzenie śladów gąsienic ---
         const distSq = (player.position.x - player.lastTrackPos.x)**2 + (player.position.z - player.lastTrackPos.z)**2;
         if (distSq > TRACK_DISTANCE_THRESHOLD**2) {
             const trackWidth = tankData.hullWidth / 2 - 0.5;
@@ -440,7 +463,7 @@ function gameLoop() {
                     id: trackId,
                     position: { x: pos.x, y: getHeightAt(pos.x, pos.z), z: pos.z },
                     rotationY: player.rotation.y,
-                    lifespan: 20.0, // 20 sekund życia
+                    lifespan: 20.0,
                     type: getTerrainTypeAt(pos.x, pos.z)
                 };
                 gameState.tracks[trackId] = track;
@@ -448,7 +471,6 @@ function gameLoop() {
             });
             player.lastTrackPos = { ...player.position };
         }
-
 
         for (const otherId in gameState.players) {
             if (id === otherId) continue; const otherPlayer = gameState.players[otherId]; if (otherPlayer.isDestroyed || otherPlayer.isSinking) continue;
@@ -497,20 +519,18 @@ function gameLoop() {
                     break; 
                 }
             }
-            if (destroyed) { /* Handled below */ }
+            if (destroyed) {}
             else if (checkProjectileBuildingCollision(p, Object.values(gameState.buildings))) { destroyed = true; }
             else if (getHeightAt(p.position.x, p.position.z) > p.position.y) {
                 destroyed = true;
-                // --- Tworzenie kraterów ---
                 if (p.weaponId === 'he') {
-                    const craterId = `crater_${nextObjectId++}`;
-                    const crater = {
-                        id: craterId,
-                        position: { x: p.position.x, y: getHeightAt(p.position.x, p.position.z), z: p.position.z },
-                        radius: 6 + Math.random() * 2
+                    const deformData = {
+                        position: { x: p.position.x, z: p.position.z },
+                        radius: 8 + Math.random() * 2,
+                        depth: 3.0 + Math.random()
                     };
-                    gameState.craters[craterId] = crater;
-                    io.emit('objectCreated', { type: 'crater', data: crater });
+                    applyDeformation(deformData);
+                    io.emit('terrainDeformed', deformData);
                 }
             }
             
@@ -543,6 +563,21 @@ function gameLoop() {
                         gameState.smokeClouds[cloudId] = { id: cloudId, position: impactPoint, radius: p.blastRadius, lifespan: 20.0 };
                         io.emit('objectCreated', { type: 'smokeCloud', data: gameState.smokeClouds[cloudId] });
                     }
+                } else if (p.weaponId === 'heat') {
+                    const fireId = `fire_${nextObjectId++}`;
+                    const fire = {
+                        id: fireId,
+                        ownerId: p.ownerId,
+                        position: impactPoint,
+                        lifespan: 20.0,
+                        initialRadius: 4.0,
+                        maxRadius: 10.0,
+                        radius: 4.0,
+                        damage: 5,
+                        damageCooldown: {}
+                    };
+                    gameState.fires[fireId] = fire;
+                    io.emit('objectCreated', { type: 'fire', data: fire });
                 }
                 delete projGroup.list[id]; 
                 io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true, weaponId: p.weaponId }); 
@@ -600,13 +635,45 @@ function gameLoop() {
         }
     }
 
+    for (const fireId in gameState.fires) {
+        const fire = gameState.fires[fireId];
+        fire.lifespan -= delta;
+
+        for (const playerId in fire.damageCooldown) {
+            if (fire.damageCooldown[playerId] > 0) {
+                fire.damageCooldown[playerId] -= delta;
+            }
+        }
+        
+        if (fire.lifespan <= 0) {
+            io.emit('objectDestroyed', { type: 'fire', id: fireId, position: fire.position, radius: fire.maxRadius });
+            delete gameState.fires[fireId];
+            continue;
+        }
+
+        const lifePercent = 1 - (fire.lifespan / 20.0); // 20.0 to początkowy czas życia
+        fire.radius = lerp(fire.initialRadius, fire.maxRadius, lifePercent);
+
+        for (const playerId in gameState.players) {
+            const player = gameState.players[playerId];
+            if (player.isDestroyed || player.isSinking) continue;
+
+            const dist = Math.sqrt((player.position.x - fire.position.x)**2 + (player.position.z - fire.position.z)**2);
+            if (dist < fire.radius) {
+                if (!fire.damageCooldown[playerId] || fire.damageCooldown[playerId] <= 0) {
+                    handleDamage(player, fire.damage, fire.ownerId);
+                    fire.damageCooldown[playerId] = 1.0; // 1 sekunda nietykalności
+                }
+            }
+        }
+    }
+
     const trackKeys = Object.keys(gameState.tracks);
     if(trackKeys.length > MAX_TRACKS) {
-        const oldestTrackId = trackKeys[0]; // Prosta implementacja FIFO
+        const oldestTrackId = trackKeys[0];
         delete gameState.tracks[oldestTrackId];
         io.emit('objectDestroyed', { type: 'track', id: oldestTrackId });
     }
-
     for (let id in gameState.tracks) {
         gameState.tracks[id].lifespan -= delta;
         if (gameState.tracks[id].lifespan <= 0) {
@@ -742,11 +809,19 @@ function createProceduralCity() {
 
 io.on("connection", (socket) => {
   console.log(`Gracz połączony: ${socket.id}`);
-  if (isGameConfigured) {
-      socket.emit('serverStatus', { configured: true, settings: { mapSize: Object.keys(MAP_SIZES).find(key => MAP_SIZES[key] === MAP_SIZE), amplitude: TERRAIN_AMPLITUDE, scale: TERRAIN_SCALE } });
-  } else {
-      socket.emit('serverStatus', { configured: false });
-  }
+  
+  const settings = { 
+      mapSize: Object.keys(MAP_SIZES).find(key => MAP_SIZES[key] === MAP_SIZE), 
+      amplitude: TERRAIN_AMPLITUDE, 
+      scale: TERRAIN_SCALE 
+  };
+  
+  socket.emit('serverStatus', { 
+      configured: isGameConfigured, 
+      settings: isGameConfigured ? settings : undefined,
+      devMode: IS_DEV_MODE // Dodana informacja o trybie deweloperskim
+  });
+
 
   socket.on("joinGame", (data) => {
     if (gameState.players[socket.id]) return; 
@@ -755,7 +830,11 @@ io.on("connection", (socket) => {
         TERRAIN_AMPLITUDE = data.config.amplitude; TERRAIN_SCALE = data.config.scale;
         console.log("Serwer skonfigurowany przez pierwszego gracza:", data.config);
         generateHeightMap(); createProceduralCity();
-        socket.broadcast.emit('serverStatus', { configured: true, settings: { mapSize: data.config.mapSize, amplitude: TERRAIN_AMPLITUDE, scale: TERRAIN_SCALE } });
+        socket.broadcast.emit('serverStatus', { 
+            configured: true, 
+            settings: { mapSize: data.config.mapSize, amplitude: TERRAIN_AMPLITUDE, scale: TERRAIN_SCALE },
+            devMode: IS_DEV_MODE
+        });
     }
     const tankType = data.tankType; if (!TANKS_DATA[tankType]) return;
     const tankData = TANKS_DATA[tankType];
@@ -809,6 +888,7 @@ io.on("connection", (socket) => {
 
 app.use(express.static(path.join(__dirname)));
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
+app.get('/favicon.ico', (req, res) => res.status(204).send()); // Obsługa favicon.ico
 
 server.listen(PORT, () => {
   console.log(`Serwer nasłuchuje na porcie ${PORT}`);

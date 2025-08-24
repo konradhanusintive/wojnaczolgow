@@ -79,8 +79,6 @@
     </div>
 
     <!-- UI Gry -->
-    <div id="sniper-overlay" style="display: none;"></div>
-
     <div id="hud" class="hud" style="display: none;">
       <div class="hud-line"><strong>TWÓJ CZOŁG</strong><span>PUNKTY: <span id="score-value">0</span></span></div>
       <div class="hud-line"><span>HP:</span><span id="hp-value"></span></div>
@@ -114,6 +112,10 @@
       <h1>WYNIKI</h1>
       <p id="score-display" style="font-size: 1.5em; text-align: left;"></p>
       <p>Przytrzymaj TAB</p>
+    </div>
+    
+    <div id="sniper-overlay">
+        <div id="sniper-reticle"></div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>

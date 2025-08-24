@@ -2,20 +2,20 @@ import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import { createSkydomeBackground } from './background.js';
 
-// --- ZMIENNE GLOBALNE I KONFIGURACJA KLIENTA ---
 let scene, renderer, clock, camera;
 let localPlayerId = null;
 let clientGameState = {};
-let selectionRenderers = [];
 let isGameStarted = false;
 let isSelectionScreenActive = false;
+let tankSelectionManager; // <-- Nowy menedżer dla ekranu wyboru
+
 let brickMaterial;
-let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial;
-let craterMaterial, sandTrackMaterial, grassTrackMaterial;
+let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial, fireMaterial, scorchMarkMaterial;
+let sandTrackMaterial, grassTrackMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 
-let heightMap; 
+let heightMap;
 let terrainMesh;
 let terrainParams;
 
@@ -23,6 +23,19 @@ let raycaster;
 const mouse = new THREE.Vector2();
 const targetPoint = new THREE.Vector3();
 const aimables = []; 
+
+// === ZMIENNE DLA TRYBU SNAJPERSKIEGO ===
+let isSniperModeActive = false;
+let sniperZoomLevel = 1.0;
+const SNIPER_MIN_ZOOM = 1.0;
+const SNIPER_MAX_ZOOM = 10.0;
+const SNIPER_SENSITIVITY = 0.002;
+const BASE_FOV = 75; 
+const mouseDelta = new THREE.Vector2();
+// === Pomocnicze wektory dla kamery snajperskiej ===
+const sniperCameraPosition = new THREE.Vector3();
+const sniperLookAtTarget = new THREE.Vector3();
+const sniperLaserEndPoint = new THREE.Vector3();
 
 const keys = {};
 let canFire = true;
@@ -42,16 +55,17 @@ const gameObjects = {
     wreckage: [],
     smokeParticles: [], 
     tracks: {},
-    craters: {}
+    craters: {},
+    fires: {}, // Nowy obiekt do przechowywania efektów ognia
 };
 
 const socket = io();
 
 // --- STAŁE I DANE ---
 const TANKS_DATA = {
-  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0 },
-  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5 },
-  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5 },
+  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0, sniperCamYOffset: 1.8 },
+  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5, sniperCamYOffset: 2.2 },
+  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5, sniperCamYOffset: 2.0 },
 };
 
 const WEAPONS_DATA = {
@@ -109,9 +123,9 @@ function createBrickMaterial() {
     const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
     return new THREE.MeshLambertMaterial({ map: texture });
 }
-function createStandardTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 5.5, hullHeight = 1.8, hullLength = 9.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength - 2), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const glacis = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight * 1.2, 2.5), hullMaterial); glacis.position.set(0, hullHeight / 2 - 0.2, -hullLength / 2 + 0.5); glacis.rotation.x = -Math.PI / 6; hullGroup.add(glacis); const trackWidth = 1.2, trackHeight = 2.4, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); const rightTrack = leftTrack.clone(); leftTrack.position.x = -hullWidth / 2 - trackWidth / 2; rightTrack.position.x = hullWidth / 2 + trackWidth / 2; trackGroup.add(leftTrack, rightTrack); tank.add(hullGroup); const turretPoints = [new THREE.Vector3(2, 0, 2), new THREE.Vector3(2, 0, -2.5), new THREE.Vector3(-2, 0, -2.5), new THREE.Vector3(-2, 0, 2), new THREE.Vector3(1.5, 2, 1.5), new THREE.Vector3(1.5, 2, -2), new THREE.Vector3(-1.5, 2, -2), new THREE.Vector3(-1.5, 2, 1.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.8, -2.5); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 3; mantlet.add(barrel); turretGroup.position.y = hullHeight + 0.1; turretGroup.position.z = 1; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.6, (hullLength - 2) / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.exhaustPoint = exhaustPoint; return tank; }
-function createPL01Tank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.0, hullHeight = 1.5, hullLength = 9.5; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.8, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const sidePanelGeom = new THREE.BoxGeometry(0.5, hullHeight * 1.5, hullLength); const leftPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); leftPanel.position.set(-hullWidth / 2, hullHeight / 2, 0); leftPanel.rotation.z = 0.5; hullGroup.add(leftPanel); const rightPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); rightPanel.position.set(hullWidth / 2, hullHeight / 2, 0); rightPanel.rotation.z = -0.5; hullGroup.add(rightPanel); tank.add(hullGroup); const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.5; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.5; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.5; hullGroup.add(trackGroup); const turretPoints = [new THREE.Vector3(2.5, 0, 3), new THREE.Vector3(2.5, 0, -3), new THREE.Vector3(-2.5, 0, -3), new THREE.Vector3(-2.5, 0, 3), new THREE.Vector3(0, 1.8, 2.5), new THREE.Vector3(0, 1.8, -2.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.6, -2.8); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333)); barrel.position.z = 3.5; mantlet.add(barrel); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.7, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.exhaustPoint = exhaustPoint; return tank; }
-function createAbramsTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.5, hullHeight = 2.0, hullLength = 10.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.7, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const trackWidth = 1.4, trackHeight = 2.0, trackLength = hullLength; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.8; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.8; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.6; hullGroup.add(trackGroup); tank.add(hullGroup); const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.2, 1.0, 8), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretGroup.add(turretBase); const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretTop.position.y = 1.1; turretGroup.add(turretTop); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.5, -3.0); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 4; mantlet.add(barrel); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.5, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.exhaustPoint = exhaustPoint; return tank; }
+function createStandardTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 5.5, hullHeight = 1.8, hullLength = 9.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength - 2), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const glacis = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight * 1.2, 2.5), hullMaterial); glacis.position.set(0, hullHeight / 2 - 0.2, -hullLength / 2 + 0.5); glacis.rotation.x = -Math.PI / 6; hullGroup.add(glacis); const trackWidth = 1.2, trackHeight = 2.4, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); const rightTrack = leftTrack.clone(); leftTrack.position.x = -hullWidth / 2 - trackWidth / 2; rightTrack.position.x = hullWidth / 2 + trackWidth / 2; trackGroup.add(leftTrack, rightTrack); tank.add(hullGroup); const turretPoints = [new THREE.Vector3(2, 0, 2), new THREE.Vector3(2, 0, -2.5), new THREE.Vector3(-2, 0, -2.5), new THREE.Vector3(-2, 0, 2), new THREE.Vector3(1.5, 2, 1.5), new THREE.Vector3(1.5, 2, -2), new THREE.Vector3(-1.5, 2, -2), new THREE.Vector3(-1.5, 2, 1.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.8, -2.5); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 3; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 3, 0); barrel.add(barrelTip); turretGroup.position.y = hullHeight + 0.1; turretGroup.position.z = 1; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.6, (hullLength - 2) / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
+function createPL01Tank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.0, hullHeight = 1.5, hullLength = 9.5; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.8, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const sidePanelGeom = new THREE.BoxGeometry(0.5, hullHeight * 1.5, hullLength); const leftPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); leftPanel.position.set(-hullWidth / 2, hullHeight / 2, 0); leftPanel.rotation.z = 0.5; hullGroup.add(leftPanel); const rightPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); rightPanel.position.set(hullWidth / 2, hullHeight / 2, 0); rightPanel.rotation.z = -0.5; hullGroup.add(rightPanel); tank.add(hullGroup); const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.5; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.5; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.5; hullGroup.add(trackGroup); const turretPoints = [new THREE.Vector3(2.5, 0, 3), new THREE.Vector3(2.5, 0, -3), new THREE.Vector3(-2.5, 0, -3), new THREE.Vector3(-2.5, 0, 3), new THREE.Vector3(0, 1.8, 2.5), new THREE.Vector3(0, 1.8, -2.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.6, -2.8); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333)); barrel.position.z = 3.5; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 0, 3.5); barrel.add(barrelTip); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.7, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
+function createAbramsTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.5, hullHeight = 2.0, hullLength = 10.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.7, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const trackWidth = 1.4, trackHeight = 2.0, trackLength = hullLength; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.8; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.8; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.6; hullGroup.add(trackGroup); tank.add(hullGroup); const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.2, 1.0, 8), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretGroup.add(turretBase); const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretTop.position.y = 1.1; turretGroup.add(turretTop); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.5, -3.0); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 4; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 4, 0); barrel.add(barrelTip); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.5, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
 
 function getHeightAt(x, z) {
     if (!heightMap || !terrainParams) return 0;
@@ -123,26 +137,23 @@ function getHeightAt(x, z) {
     const tx = gridX - x1; const tz = gridZ - z1; const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx; return h_x1 * (1 - tz) + h_x2 * tz;
 }
 
-function createCraterTexture() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 128; canvas.height = 128;
-    const ctx = canvas.getContext("2d");
-    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0, "rgba(20, 10, 5, 0.8)");
-    gradient.addColorStop(0.7, "rgba(40, 20, 10, 0.6)");
-    gradient.addColorStop(1, "rgba(50, 30, 20, 0)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 128, 128);
-    return new THREE.CanvasTexture(canvas);
-}
-
 function createTrackMarkTexture(type) {
     const canvas = document.createElement("canvas");
     canvas.width = 32; canvas.height = 64;
     const ctx = canvas.getContext("2d");
-    const color = (type === 'sand') ? 'rgba(0, 0, 0, 0.15)' : 'rgba(82, 62, 43, 0.25)';
-    ctx.fillStyle = color;
-    for (let i = 0; i < canvas.height; i += 8) {
+    const color = (type === 'sand' || type === 'mud') 
+        ? 'rgba(100, 80, 60, 0.25)'
+        : 'rgba(80, 55, 35, 0.35)';
+
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    const transparent = 'rgba(0,0,0,0)';
+    gradient.addColorStop(0, transparent);
+    gradient.addColorStop(0.15, color);
+    gradient.addColorStop(0.85, color);
+    gradient.addColorStop(1, transparent);
+    
+    ctx.fillStyle = gradient;
+    for (let i = 2; i < canvas.height; i += 8) {
         ctx.fillRect(0, i, canvas.width, 4);
     }
     return new THREE.CanvasTexture(canvas);
@@ -242,6 +253,21 @@ function createSmokeTexture() {
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1)'); gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(canvas);
 }
+function createFireTexture() {
+    const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, 'rgba(255, 200, 50, 1)');
+    gradient.addColorStop(0.5, 'rgba(255, 80, 0, 0.7)');
+    gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(canvas);
+}
+function createScorchMarkTexture() {
+    const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext("2d");
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, "rgba(20, 10, 0, 0.8)");
+    gradient.addColorStop(1, "rgba(20, 10, 0, 0)");
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(canvas);
+}
 function createMuzzleFlashTexture() {
     const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128;
     const ctx = canvas.getContext("2d");
@@ -272,7 +298,6 @@ function triggerMuzzleFlash(barrel) {
     };
     gameObjects.particles.push(particle);
     scene.add(flash);
-    // Dym z lufy
     setTimeout(() => {
         if (!barrel) return;
         const smokePos = new THREE.Vector3();
@@ -285,7 +310,6 @@ function triggerMuzzleFlash(barrel) {
     }, 50);
 }
 function createHitEffect(position, impulse) {
-    // Iskry
     for (let i = 0; i < 15; i++) {
         const particle = new THREE.Mesh(
             new THREE.BoxGeometry(0.1, 0.1, 0.8),
@@ -299,7 +323,6 @@ function createHitEffect(position, impulse) {
         gameObjects.particles.push(particle);
         scene.add(particle);
     }
-    // Płomień
     createExplosion(position, 1.0);
 }
 function createEMPTankEffect(tankMesh) {
@@ -309,7 +332,7 @@ function createEMPTankEffect(tankMesh) {
     const effect = {
         mesh: effectMesh,
         target: tankMesh,
-        lifespan: 0.2, // Krótki czas życia, będzie resetowany w pętli animacji
+        lifespan: 0.2,
     };
     gameObjects.particles.push(effect);
     scene.add(effectMesh);
@@ -327,7 +350,7 @@ function createSmokeCloud(position, radius, duration) {
         const pMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cloudSmokeMaterial.clone());
         const p = {
             mesh: pMesh,
-            velocity: new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.5, (Math.random() - 0.5) * 0.5),
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.5, (Math.random() - 0.5) * 0.5 ),
             startPos: new THREE.Vector3( (Math.random() - 0.5) * radius * 0.8, Math.random() * radius * 0.3, (Math.random() - 0.5) * radius * 0.8 ),
             startSize: radius * (0.8 + Math.random() * 0.5),
         };
@@ -335,14 +358,174 @@ function createSmokeCloud(position, radius, duration) {
         cloud.particles.push(p);
         scene.add(p.mesh);
     }
-    gameObjects.smokeClouds[Date.now()] = cloud; // Używamy timestamp jako ID
+    gameObjects.smokeClouds[Date.now()] = cloud;
 }
+function createFireEffect(fireData) {
+    const fireObject = {
+        id: fireData.id,
+        particles: [],
+        position: new THREE.Vector3(fireData.position.x, fireData.position.y, fireData.position.z)
+    };
+    const particleCount = 70;
+    for (let i = 0; i < particleCount; i++) {
+        const pMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMaterial.clone());
+        const lifespan = 0.5 + Math.random() * 0.8;
+        const p = {
+            mesh: pMesh,
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 4 + 2, (Math.random() - 0.5) * 2),
+            initialLifespan: lifespan,
+            lifespan: lifespan,
+            startSize: 1.5 + Math.random() * 2,
+            endSize: 0,
+        };
+        const spawnRadius = fireData.initialRadius * 0.5;
+        p.mesh.position.copy(fireObject.position).add(
+            new THREE.Vector3(
+                (Math.random() - 0.5) * spawnRadius,
+                Math.random() * 1.5,
+                (Math.random() - 0.5) * spawnRadius
+            )
+        );
+        fireObject.particles.push(p);
+        scene.add(p.mesh);
+    }
+    gameObjects.fires[fireData.id] = fireObject;
+}
+
+// --- NOWA KLASA DO ZARZĄDZANIA EKRANEM WYBORU ---
+
+class TankSelectionManager {
+    constructor(tankKeys) {
+        this.tankKeys = tankKeys;
+        this.renderTargets = [];
+        this.isActive = false;
+        this.animationFrameId = null;
+    }
+
+    init() {
+        this.tankKeys.forEach(tankKey => {
+            const canvas = document.getElementById(`canvas-${tankKey}`);
+            if (!canvas || canvas.clientWidth === 0) {
+                console.error(`Canvas for ${tankKey} not found or has no size.`);
+                return;
+            }
+
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa));
+            tankMesh.scale.set(0.6, 0.6, 0.6); // ZWIĘKSZONA SKALA
+            tankMesh.position.y = -2.5; // Dopasowana pozycja
+            scene.add(tankMesh);
+
+            camera.position.z = 8; // Odsunięta kamera
+
+            const target = {
+                canvas, scene, camera, renderer, tankMesh,
+                isDragging: false,
+                initialMouse: { x: 0, y: 0 },
+                initialRotation: { y: 0 }
+            };
+
+            this.addEventListeners(target);
+            this.renderTargets.push(target);
+        });
+
+        this.startAnimation();
+    }
+
+    addEventListeners(target) {
+        const { canvas, camera } = target;
+
+        canvas.addEventListener('mousedown', (e) => {
+            target.isDragging = true;
+            target.initialMouse.x = e.clientX;
+            target.initialRotation.y = target.tankMesh.rotation.y;
+        });
+
+        window.addEventListener('mouseup', () => {
+            target.isDragging = false;
+        });
+        
+        window.addEventListener('mousemove', (e) => {
+            if (!target.isDragging) return;
+            const deltaX = e.clientX - target.initialMouse.x;
+            target.tankMesh.rotation.y = target.initialRotation.y + deltaX * 0.01;
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSpeed = 0.5;
+            camera.position.z += e.deltaY > 0 ? zoomSpeed : -zoomSpeed;
+            camera.position.z = Math.max(5, Math.min(12, camera.position.z)); // Zaktualizowany zakres zoomu
+        });
+    }
+
+    startAnimation() {
+        this.isActive = true;
+        this.animate();
+    }
+
+    stopAnimation() {
+        this.isActive = false;
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+        }
+    }
+
+    animate() {
+        if (!this.isActive) return;
+
+        this.renderTargets.forEach(target => {
+            if (!target.isDragging) {
+                target.tankMesh.rotation.y += 0.005;
+            }
+            target.renderer.render(target.scene, target.camera);
+        });
+
+        this.animationFrameId = requestAnimationFrame(() => this.animate());
+    }
+
+    destroy() {
+        this.stopAnimation();
+        this.renderTargets.forEach(target => {
+            target.renderer.dispose();
+            target.scene.traverse(obj => {
+                if(obj.isMesh){
+                    if (obj.geometry) obj.geometry.dispose();
+                    if (obj.material) {
+                        if (Array.isArray(obj.material)) {
+                            obj.material.forEach(mat => mat.dispose());
+                        } else {
+                            obj.material.dispose();
+                        }
+                    }
+                }
+            });
+        });
+        this.renderTargets = [];
+    }
+}
+
 
 // --- LOGIKA UI ---
 function initializeUI() {
     document.getElementById("intro-logo").addEventListener("animationend", () => {
-        document.getElementById("intro-screen").style.display = "none"; document.getElementById("start-screen").style.display = "flex";
-        initSelectionScreenRenderers(); animateSelectionScreen(); isSelectionScreenActive = true;
+        document.getElementById("intro-screen").style.display = "none"; 
+        document.getElementById("start-screen").style.display = "flex";
+        
+        setTimeout(() => {
+            isSelectionScreenActive = true;
+            tankSelectionManager = new TankSelectionManager(Object.keys(TANKS_DATA));
+            tankSelectionManager.init();
+        }, 100); // Małe opóźnienie, by DOM się ustabilizował
     });
     Object.keys(TANKS_DATA).forEach((tankKey) => {
         const tank = TANKS_DATA[tankKey];
@@ -352,13 +535,16 @@ function initializeUI() {
     document.querySelectorAll(".select-button").forEach((button) => {
         button.addEventListener("click", (e) => {
             if (button.disabled) return; 
+
+            isSelectionScreenActive = false;
+            if (tankSelectionManager) tankSelectionManager.destroy();
+
             const card = e.target.closest(".tank-card"); const tankType = card.id.split("-")[1];
             const mapSize = document.querySelector('input[name="map-size"]:checked').value;
             const amplitude = parseInt(document.getElementById('terrain-amplitude').value, 10);
             const scale = parseInt(document.getElementById('terrain-scale').value, 10);
             socket.emit("joinGame", { tankType: tankType, config: { mapSize: mapSize, amplitude: amplitude, scale: scale } }); 
-            document.getElementById("start-screen").style.display = "none"; isSelectionScreenActive = false;
-            selectionRenderers.forEach(({ renderer }) => renderer.dispose()); selectionRenderers = [];
+            document.getElementById("start-screen").style.display = "none";
         });
     });
     const ampSlider = document.getElementById('terrain-amplitude'); const ampValue = document.getElementById('amplitude-value'); ampSlider.addEventListener('input', () => ampValue.textContent = ampSlider.value);
@@ -381,19 +567,7 @@ function initializeUI() {
         weaponBar.appendChild(slot);
     });
 }
-function initSelectionScreenRenderers() {
-    Object.keys(TANKS_DATA).forEach((tankKey) => {
-        const canvas = document.getElementById(`canvas-${tankKey}`); const scene = new THREE.Scene(); const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true }); renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-        scene.add(new THREE.AmbientLight(0xffffff, 1.2)); const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); dirLight.position.set(5, 10, 7); scene.add(dirLight);
-        const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa)); tankMesh.scale.set(0.2, 0.2, 0.2); tankMesh.position.y = -1.5; scene.add(tankMesh); camera.position.z = 5;
-        selectionRenderers.push({ scene, camera, renderer, tankMesh });
-    });
-}
-function animateSelectionScreen() {
-    if (!isSelectionScreenActive) return; requestAnimationFrame(animateSelectionScreen);
-    selectionRenderers.forEach((item) => { item.tankMesh.rotation.y += 0.01; item.renderer.render(item.scene, item.camera); });
-}
+
 function updateHUD() {
     const hudEl = document.getElementById('hud'); 
     const minimapEl = document.getElementById('minimap-container');
@@ -476,16 +650,17 @@ function initGame(payload) {
     renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(window.innerWidth, window.innerHeight); 
     renderer.shadowMap.enabled = true; document.body.appendChild(renderer.domElement);
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x87CEEB); scene.fog = new THREE.Fog(0x87CEEB, 2000, 15000); 
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000); clock = new THREE.Clock();
+    camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 20000); clock = new THREE.Clock();
     createSkydomeBackground(scene);
     scene.add(new THREE.AmbientLight(0xffffff, 1.0));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); dirLight.position.set(100, 80, 50); dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048; scene.add(dirLight);
-    raycaster = new THREE.Raycaster(); document.body.classList.add('crosshair-cursor');
+    raycaster = new THREE.Raycaster();
+    
     minimapCanvas = document.getElementById('minimap'); minimapCanvas.width = 220; minimapCanvas.height = 220; minimapCtx = minimapCanvas.getContext('2d');
     const terrainGeometry = new THREE.PlaneGeometry(terrainParams.size, terrainParams.size, terrainParams.segments, terrainParams.segments);
     const vertices = terrainGeometry.attributes.position.array; const segments = terrainParams.segments;
-    for (let i = 0; i <= segments; i++) { for (let j = 0; j <= segments; j++) { vertices[(i * (segments + 1) + j) * 3 + 2] = heightMap[j][i]; } }
+    for (let i = 0; i <= segments; i++) { for (let j = 0; j <= segments; j++) { vertices[(j * (segments + 1) + i) * 3 + 2] = heightMap[i][j]; } }
     terrainGeometry.attributes.position.needsUpdate = true; terrainGeometry.computeVertexNormals();
     const groundMaterial = new THREE.MeshLambertMaterial({ map: createGroundTexture(heightMap, terrainParams) });
     terrainMesh = new THREE.Mesh(terrainGeometry, groundMaterial); terrainMesh.rotation.x = -Math.PI / 2; terrainMesh.name = 'ground';
@@ -501,13 +676,15 @@ function initGame(payload) {
     cloudSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0xcccccc, depthWrite: false, opacity: 0.8 });
     muzzleFlashMaterial = new THREE.SpriteMaterial({ map: createMuzzleFlashTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     
-    // Materiały do śladów i kraterów
     sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
     grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
-    craterMaterial = new THREE.MeshBasicMaterial({ map: createCraterTexture(), transparent: true, depthWrite: false });
+    
+    fireMaterial = new THREE.MeshBasicMaterial({ map: createFireTexture(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+    scorchMarkMaterial = new THREE.MeshBasicMaterial({ map: createScorchMarkTexture(), transparent: true, depthWrite: false });
 
-
-    reconcileGameState(clientGameState); setupEventListeners(); animate();
+    reconcileGameState(clientGameState); 
+    setupEventListeners(); 
+    animate();
     setInterval(() => { if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed && !clientGameState.players[localPlayerId].isSinking) { if (Math.random() > 0.6) showTankQuote(localPlayerId); } }, 15000 + Math.random() * 5000);
 }
 function handleFireInput() {
@@ -521,8 +698,17 @@ function handleFireInput() {
     else { const weaponData = WEAPONS_DATA[playerState.currentWeapon]; if(weaponData) currentCooldown = weaponData.cooldown; }
     
     const localPlayerMesh = gameObjects.players[localPlayerId];
-    const barrelWorldPos = new THREE.Vector3(); localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
-    const direction = new THREE.Vector3().subVectors(targetPoint, barrelWorldPos).normalize();
+    const barrelWorldPos = new THREE.Vector3(); 
+    localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
+    
+    let direction;
+    if (isSniperModeActive) {
+        direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+    } else {
+        direction = new THREE.Vector3().subVectors(targetPoint, barrelWorldPos).normalize();
+    }
+
     socket.emit('playerAction', { type: 'fire', direction: direction, startPosition: barrelWorldPos });
     canFire = false; fireCooldown = currentCooldown;
 }
@@ -552,8 +738,61 @@ function setupEventListeners() {
         if (e.code === "Tab") { e.preventDefault(); scoreEl.style.display = "flex"; updateScoreboard(); }
     });
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
-    document.addEventListener('mousemove', (e) => { if (isGameStarted) { mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = - (e.clientY / window.innerHeight) * 2 + 1; } });
-    document.addEventListener('mousedown', (e) => { if(isGameStarted && e.button === 0) { handleFireInput(); } });
+    
+    document.addEventListener('mousemove', (e) => { 
+        if (document.pointerLockElement === renderer.domElement) {
+            mouseDelta.x += e.movementX;
+            mouseDelta.y += e.movementY;
+        } else {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1; 
+            mouse.y = - (e.clientY / window.innerHeight) * 2 + 1;
+        }
+    });
+    
+    document.addEventListener('mousedown', (e) => {
+        if (!isGameStarted) return;
+        if (e.button === 0) { handleFireInput(); }
+        if (e.button === 2) { 
+            renderer.domElement.requestPointerLock();
+        }
+    });
+    document.addEventListener('mouseup', (e) => {
+        if (!isGameStarted) return;
+        if (e.button === 2) {
+            document.exitPointerLock();
+        }
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+        const sniperOverlay = document.getElementById('sniper-overlay');
+        const hudElements = [document.getElementById('hud'), document.getElementById('minimap-container'), document.getElementById('weapon-bar')];
+        if (document.pointerLockElement === renderer.domElement) {
+            isSniperModeActive = true;
+            sniperOverlay.style.display = 'block';
+            hudElements.forEach(el => el.style.opacity = '0.2');
+            document.body.classList.remove('crosshair-cursor');
+        } else {
+            isSniperModeActive = false;
+            sniperZoomLevel = SNIPER_MIN_ZOOM;
+            camera.fov = BASE_FOV;
+            camera.updateProjectionMatrix();
+            sniperOverlay.style.display = 'none';
+            hudElements.forEach(el => el.style.opacity = '1');
+            document.body.classList.add('crosshair-cursor');
+        }
+    });
+
+    document.addEventListener('wheel', (e) => {
+        if (!isGameStarted || !isSniperModeActive) return;
+        if (e.deltaY < 0) {
+            sniperZoomLevel = Math.min(SNIPER_MAX_ZOOM, sniperZoomLevel * 1.25);
+        } else {
+            sniperZoomLevel = Math.max(SNIPER_MIN_ZOOM, sniperZoomLevel / 1.25);
+        }
+        camera.fov = BASE_FOV / sniperZoomLevel;
+        camera.updateProjectionMatrix();
+    });
+
     document.addEventListener('contextmenu', e => e.preventDefault());
 }
 
@@ -568,14 +807,16 @@ function reconcileGameState(serverState) {
             tank.lastPosition = new THREE.Vector3().copy(tank.position);
             tank.exhaustCooldown = 0;
             scene.add(tank); gameObjects.players[id] = tank;
+            if (id !== localPlayerId) aimables.push(tank);
         }
     }
     const serverBuildingIds = Object.keys(serverState.buildings || {});
     for (const id of serverBuildingIds) { if (!gameObjects.buildings[id]) { createBuildingMesh(serverState.buildings[id]); } }
     
-    const objectTypes = ['crates', 'ammoCrates', 'tracks', 'craters'];
+    // --- POPRAWIONA PĘTLA TWORZENIA OBIEKTÓW ---
+    const objectTypes = ['crate', 'ammoCrate', 'track'];
     for (const type of objectTypes) {
-        const pluralType = type.endsWith('s') ? type : type + 's';
+        const pluralType = type === 'track' ? 'tracks' : type + 's';
         const serverObjectIds = Object.keys(serverState[pluralType] || {});
         for (const id of serverObjectIds) { 
             if (!gameObjects[pluralType][id]) { 
@@ -610,18 +851,17 @@ function createObjectMesh(payload) {
         case 'crate': newMesh = createSupplyCrate(); break;
         case 'ammoCrate': newMesh = createAmmoCrateMesh(); break;
         case 'track':
-            const trackMat = data.type === 'sand' ? sandTrackMaterial.clone() : grassTrackMaterial.clone();
-            newMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 3), trackMat);
+            const trackMat = (data.type === 'sand' || data.type === 'mud') ? sandTrackMaterial.clone() : grassTrackMaterial.clone();
+            newMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 4.0), trackMat);
             newMesh.rotation.x = -Math.PI / 2;
             newMesh.rotation.z = data.rotationY;
             break;
-        case 'crater':
-            newMesh = new THREE.Mesh(new THREE.CircleGeometry(data.radius, 32), craterMaterial.clone());
-            newMesh.rotation.x = -Math.PI / 2;
-            break;
+        case 'fire':
+            createFireEffect(data);
+            return;
     }
     if (newMesh) {
-        newMesh.position.set(data.position.x, data.position.y + (type === 'track' || type === 'crater' ? 0.06 : 0), data.position.z);
+        newMesh.position.set(data.position.x, data.position.y + (type === 'track' ? 0.06 : 0), data.position.z);
         if(data.rotationY && type !== 'track') newMesh.rotation.y = data.rotationY;
         
         container[data.id] = {
@@ -638,9 +878,97 @@ function createObjectMesh(payload) {
     }
 }
 
+// --- PRZYWRÓCONA FUNKCJA MINIMAPY ---
+function drawMinimap() {
+    if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || !minimapCtx) { return; }
+    const localPlayer = clientGameState.players[localPlayerId];
+    if (localPlayer.isDestroyed || localPlayer.isSinking) { minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height); return; }
+    const ctx = minimapCtx; const canvas = minimapCanvas; const centerX = canvas.width / 2; const centerY = canvas.height / 2;
+    const radius = canvas.width / 2; const scale = radius / (terrainParams.size * 0.55);
+    const playerRot = localPlayer.rotation.y; const cosR = Math.cos(playerRot); const sinR = Math.sin(playerRot);
+    const transformPoint = (x, z) => { const dx = x - localPlayer.position.x; const dz = z - localPlayer.position.z; const rotatedX = dx * cosR + dz * sinR; const rotatedZ = -dx * sinR + dz * cosR; return { x: centerX + rotatedX * scale, y: centerY - rotatedZ * scale }; };
+    ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.save(); ctx.beginPath(); ctx.arc(centerX, centerY, radius, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = 'rgba(10, 25, 10, 0.75)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(50, 255, 50, 0.2)'; ctx.lineWidth = 1;
+    [0.25, 0.5, 0.75].forEach(r => { ctx.beginPath(); ctx.arc(centerX, centerY, radius * r, 0, Math.PI * 2); ctx.stroke(); });
+    ctx.beginPath(); ctx.moveTo(centerX - radius, centerY); ctx.lineTo(centerX + radius, centerY); ctx.moveTo(centerX, centerY - radius); ctx.lineTo(centerX, centerY + radius); ctx.stroke();
+    const currentTime = Date.now();
+    ctx.fillStyle = 'rgba(50, 200, 50, 0.25)';
+    for (const id in gameObjects.buildings) {
+        const buildingData = gameObjects.buildings[id]?.data; if (!buildingData) continue;
+        const bPos = buildingData.position; const bDim = buildingData.dimensions; const halfW = bDim.x / 2; const halfD = bDim.z / 2;
+        const corners = [ { x: bPos.x - halfW, z: bPos.z - halfD }, { x: bPos.x + halfW, z: bPos.z - halfD }, { x: bPos.x + halfW, z: bPos.z + halfD }, { x: bPos.x - halfW, z: bPos.z + halfD }, ];
+        const transformedCorners = corners.map(c => transformPoint(c.x, c.z));
+        if (transformedCorners.every(c => c !== null)) { ctx.beginPath(); ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y); for(let i = 1; i < transformedCorners.length; i++) { ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y); } ctx.closePath(); ctx.fill(); }
+    }
+    const crateBlink = Math.sin(currentTime * 0.005) * 0.4 + 0.6; ctx.fillStyle = `rgba(255, 223, 0, ${crateBlink})`; ctx.strokeStyle = `rgba(255, 223, 0, ${crateBlink + 0.2})`; ctx.lineWidth = 2;
+    for (const id in clientGameState.crates) { const crate = clientGameState.crates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
+    ctx.fillStyle = `rgba(100, 200, 100, ${crateBlink})`; ctx.strokeStyle = `rgba(100, 200, 100, ${crateBlink + 0.2})`;
+    for (const id in clientGameState.ammoCrates) { const crate = clientGameState.ammoCrates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
+    ctx.fillStyle = '#ff1a1a';
+    for (const id in clientGameState.players) {
+        if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
+        const player = clientGameState.players[id]; const transformed = transformPoint(player.position.x, player.position.z);
+        if (transformed) { ctx.beginPath(); ctx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2); ctx.fill(); }
+    }
+    const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius); sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)'); sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)'); sweepGradient.addColorStop(1, 'rgba(128, 255, 128, 0)');
+    ctx.beginPath(); ctx.moveTo(centerX, centerY); ctx.arc(centerX, centerY, radius, minimapScanAngle, minimapScanAngle + Math.PI * 0.3); ctx.closePath(); ctx.fillStyle = sweepGradient; ctx.fill(); ctx.restore(); 
+    ctx.save(); ctx.translate(centerX, centerY); ctx.fillStyle = '#66ff66'; ctx.shadowColor = '#66ff66'; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-6, 8); ctx.lineTo(6, 8); ctx.closePath(); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = 'rgba(50, 255, 50, 0.8)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(centerX, centerY, radius - 1.5, 0, Math.PI * 2); ctx.stroke();
+}
+
+function updateTerrainMesh(data) {
+    if (!terrainMesh) return;
+
+    const { position, radius, depth } = data;
+    const { size, segments } = terrainParams;
+    const radiusSq = radius * radius;
+    const step = size / segments;
+
+    const vertices = terrainMesh.geometry.attributes.position.array;
+
+    const startX_grid = Math.max(0, Math.floor(((position.x - radius) + size / 2) / step));
+    const endX_grid = Math.min(segments, Math.ceil(((position.x + radius) + size / 2) / step));
+    const startZ_grid = Math.max(0, Math.floor(((position.z - radius) + size / 2) / step));
+    const endZ_grid = Math.min(segments, Math.ceil(((position.z + radius) + size / 2) / step));
+
+    for (let j = startZ_grid; j <= endZ_grid; j++) {
+        for (let i = startX_grid; i <= endX_grid; i++) {
+            const Px = i * step - size / 2;
+            const Pz = j * step - size / 2;
+            const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
+
+            if (distSq < radiusSq) {
+                const dist = Math.sqrt(distSq);
+                const depression = depth * (0.5 * (Math.cos(dist / radius * Math.PI) + 1));
+                
+                if (heightMap[i] && heightMap[i][j] !== undefined) {
+                    heightMap[i][j] -= depression;
+                }
+                
+                const vertexIndex = (j * (segments + 1) + i) * 3 + 2;
+                vertices[vertexIndex] -= depression;
+            }
+        }
+    }
+
+    terrainMesh.geometry.attributes.position.needsUpdate = true;
+    terrainMesh.geometry.computeVertexNormals();
+}
+
+
 function animate() {
-    if (!isGameStarted) return; requestAnimationFrame(animate);
+    if (isSelectionScreenActive) {
+        requestAnimationFrame(animate);
+        return;
+    }
+    if (!isGameStarted) return;
+    
+    requestAnimationFrame(animate);
     const delta = clock.getDelta();
+    const localPlayerMesh = gameObjects.players[localPlayerId];
+
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
     socket.emit("playerInput", keys);
@@ -688,12 +1016,34 @@ function animate() {
                 }
             }
             if (clientTank.laserSight && serverPlayer.laserData) {
-                const laser = clientTank.laserSight; const data = serverPlayer.laserData;
-                const isVisible = data.enabled && !serverPlayer.isDestroyed && !serverPlayer.isSinking; laser.visible = isVisible;
-                if (isVisible) {
+                const laser = clientTank.laserSight;
+                laser.visible = serverPlayer.laserData.enabled && !serverPlayer.isDestroyed && !serverPlayer.isSinking;
+                
+                if (laser.visible) {
                     const positions = laser.geometry.attributes.position.array;
-                    positions[0] = data.start.x; positions[1] = data.start.y; positions[2] = data.start.z;
-                    positions[3] = data.end.x; positions[4] = data.end.y; positions[5] = data.end.z;
+                    if (isSniperModeActive && id === localPlayerId) {
+                        raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+                        const intersects = raycaster.intersectObjects(aimables, true);
+                        const endPoint = intersects.length > 0 ? intersects[0].point : raycaster.ray.at(10000, sniperLaserEndPoint);
+                        
+                        const startPoint = new THREE.Vector3();
+                        localPlayerMesh.barrelTip.getWorldPosition(startPoint);
+                        
+                        positions[0] = startPoint.x;
+                        positions[1] = startPoint.y;
+                        positions[2] = startPoint.z;
+                        positions[3] = endPoint.x;
+                        positions[4] = endPoint.y;
+                        positions[5] = endPoint.z;
+                    } else {
+                        const data = serverPlayer.laserData;
+                        positions[0] = data.start.x;
+                        positions[1] = data.start.y;
+                        positions[2] = data.start.z;
+                        positions[3] = data.end.x;
+                        positions[4] = data.end.y;
+                        positions[5] = data.end.z;
+                    }
                     laser.geometry.attributes.position.needsUpdate = true;
                 }
             }
@@ -729,10 +1079,41 @@ function animate() {
 
     for (const id in gameObjects.tracks) {
         const track = gameObjects.tracks[id];
-        if (track.lifespan !== undefined) {
-            track.lifespan -= delta;
-            const lifePercent = Math.max(0, track.lifespan / track.initialLifespan);
-            track.mesh.material.opacity = lifePercent * 0.8; // Znikaj płynnie
+        const serverTrack = clientGameState.tracks ? clientGameState.tracks[id] : null;
+        if (track && serverTrack && track.initialLifespan) {
+            const lifePercent = Math.max(0, serverTrack.lifespan / track.initialLifespan);
+            track.mesh.material.opacity = lifePercent;
+        }
+    }
+
+    for (const id in gameObjects.fires) {
+        const fire = gameObjects.fires[id];
+        const serverFire = clientGameState.fires[id];
+        if (!serverFire) continue;
+
+        const currentRadius = serverFire.radius;
+
+        for (let i = fire.particles.length - 1; i >= 0; i--) {
+            const p = fire.particles[i];
+            p.lifespan -= delta;
+            if (p.lifespan <= 0) {
+                p.lifespan = p.initialLifespan;
+                const spawnRadius = currentRadius * 0.5;
+                p.mesh.position.copy(fire.position).add(
+                    new THREE.Vector3(
+                        (Math.random() - 0.5) * spawnRadius,
+                        Math.random() * 1.5,
+                        (Math.random() - 0.5) * spawnRadius
+                    )
+                );
+            } else {
+                p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
+                const lifePercent = p.lifespan / p.initialLifespan;
+                p.mesh.material.opacity = Math.sin(lifePercent * Math.PI);
+                const currentScale = p.startSize + (p.endSize - p.startSize) * (1 - lifePercent);
+                p.mesh.scale.set(currentScale, currentScale, currentScale);
+                p.mesh.lookAt(camera.position);
+            }
         }
     }
 
@@ -768,7 +1149,7 @@ function animate() {
             const lifePercent = cloud.lifespan / cloud.initialLifespan;
             cloud.particles.forEach(p => {
                 p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
-                const currentScale = p.startSize * (1 - Math.abs(lifePercent - 0.5) * 2); // grow and shrink
+                const currentScale = p.startSize * (1 - Math.abs(lifePercent - 0.5) * 2);
                 p.mesh.scale.set(currentScale, currentScale, currentScale);
                 p.mesh.material.opacity = Math.min(0.8, lifePercent * 2);
                 p.mesh.lookAt(camera.position);
@@ -794,31 +1175,67 @@ function animate() {
             bubble.style.left = `${x}px`; bubble.style.top = `${y}px`;
         }
     }
-    const localPlayerMesh = gameObjects.players[localPlayerId];
+    
     if (localPlayerMesh) {
         const localPlayerState = clientGameState.players[localPlayerId];
-        raycaster.setFromCamera(mouse, camera); const intersects = raycaster.intersectObjects(aimables, true);
-        if (intersects.length > 0) { targetPoint.copy(intersects[0].point); } 
-        else { const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -localPlayerMesh.position.y); raycaster.ray.intersectPlane(plane, targetPoint); }
-
+        
         if (localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking && !localPlayerState.isEmpDisabled) {
-            const turret = localPlayerMesh.turret; const mantlet = localPlayerMesh.mantlet;
-            const localTargetInTurret = turret.worldToLocal(targetPoint.clone());
-            const targetTurretAngle = Math.atan2(localTargetInTurret.x, localTargetInTurret.z);
-            let diff = targetTurretAngle - turret.rotation.y;
-            while (diff < -Math.PI) diff += 2 * Math.PI; while (diff > Math.PI) diff -= 2 * Math.PI;
-            turret.rotation.y += diff * 0.15;
-            const targetMantletAngle = Math.atan2(localTargetInTurret.y, Math.sqrt(localTargetInTurret.x**2 + localTargetInTurret.z**2));
-            mantlet.rotation.x = THREE.MathUtils.lerp(mantlet.rotation.x, Math.max(-0.5, Math.min(0.2, targetMantletAngle)), 0.15);
-            localPlayerState.turretRotation.y = turret.rotation.y; localPlayerState.mantletRotation.x = mantlet.rotation.x;
+            const turret = localPlayerMesh.turret; 
+            const mantlet = localPlayerMesh.mantlet;
+            
+            if (isSniperModeActive) {
+                turret.rotation.y -= mouseDelta.x * SNIPER_SENSITIVITY;
+                mantlet.rotation.x += mouseDelta.y * SNIPER_SENSITIVITY;
+                mantlet.rotation.x = Math.max(-0.5, Math.min(0.2, mantlet.rotation.x));
+            } else {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(aimables, true);
+                if (intersects.length > 0) { targetPoint.copy(intersects[0].point); } 
+                else { const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -localPlayerMesh.position.y); raycaster.ray.intersectPlane(plane, targetPoint); }
+                
+                const localTargetInTurret = turret.worldToLocal(targetPoint.clone());
+                const targetTurretAngle = Math.atan2(localTargetInTurret.x, localTargetInTurret.z);
+                let diff = targetTurretAngle - turret.rotation.y;
+                while (diff < -Math.PI) diff += 2 * Math.PI; while (diff > Math.PI) diff -= 2 * Math.PI;
+                turret.rotation.y += diff * 0.15;
+                const targetMantletAngle = Math.atan2(localTargetInTurret.y, Math.sqrt(localTargetInTurret.x**2 + localTargetInTurret.z**2));
+                mantlet.rotation.x = THREE.MathUtils.lerp(mantlet.rotation.x, Math.max(-0.5, Math.min(0.2, targetMantletAngle)), 0.15);
+            }
+            
+            localPlayerState.turretRotation.y = turret.rotation.y; 
+            localPlayerState.mantletRotation.x = mantlet.rotation.x;
             socket.emit('playerAimUpdate', { turretY: turret.rotation.y, mantletX: mantlet.rotation.x });
-            const barrelWorldPos = new THREE.Vector3(); localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
+            const barrelWorldPos = new THREE.Vector3(); 
+            localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
             socket.emit('laserUpdate', { start: barrelWorldPos, end: targetPoint });
         }
         
-        if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
+        mouseDelta.set(0, 0);
+
+        if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
+            const tankData = TANKS_DATA[localPlayerState.tankType];
+            const cameraOffsetY = tankData.sniperCamYOffset || 1.5;
+
+            localPlayerMesh.barrelTip.getWorldPosition(sniperCameraPosition);
+            
+            const sniperViewPosition = sniperCameraPosition.clone();
+            sniperViewPosition.y += cameraOffsetY;
+
+            const mantletPosition = new THREE.Vector3();
+            localPlayerMesh.mantlet.getWorldPosition(mantletPosition);
+            const forwardVector = new THREE.Vector3().subVectors(sniperCameraPosition, mantletPosition).normalize();
+            
+            forwardVector.y += 0.02; 
+            forwardVector.normalize();
+
+            const lookAtTargetPoint = sniperViewPosition.clone().add(forwardVector.multiplyScalar(100));
+            
+            camera.position.lerp(sniperViewPosition, 0.7);
+            camera.lookAt(lookAtTargetPoint);
+        } else if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
             const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
-            camera.position.lerp(dronePosition, 0.05); camera.lookAt(localPlayerMesh.position);
+            camera.position.lerp(dronePosition, 0.05); 
+            camera.lookAt(localPlayerMesh.position);
         } else if (localPlayerState) {
             const offset = new THREE.Vector3(0, 20, -30);
             const chassisQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, localPlayerState.rotation.y, 0));
@@ -827,7 +1244,8 @@ function animate() {
             camera.lookAt(localPlayerMesh.position.clone().add(new THREE.Vector3(0, 3, 0)));
         }
     }
-    updateHUD();
+    updateHUD(); 
+    drawMinimap(); 
     renderer.render(scene, camera);
 }
 
@@ -842,6 +1260,18 @@ socket.on('serverStatus', (data) => {
         const scaleSlider = document.getElementById('terrain-scale'); const scaleValue = document.getElementById('scale-value');
         scaleSlider.value = data.settings.scale; scaleValue.textContent = data.settings.scale;
     } else { console.log("Serwer oczekuje na konfigurację."); }
+    
+    if (data.devMode) {
+        console.log("Tryb deweloperski AKTYWNY. Odblokowywanie zawartości premium.");
+        const abramsCard = document.getElementById('select-abrams');
+        const abramsButton = abramsCard.querySelector('button');
+        const premiumLabel = abramsCard.querySelector('.premium-label');
+
+        abramsCard.classList.remove('locked');
+        abramsButton.disabled = false;
+        abramsButton.textContent = 'Wybierz i Walcz';
+        if (premiumLabel) premiumLabel.style.display = 'none';
+    }
 });
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
 socket.on("gameStateUpdate", (serverState) => {
@@ -853,8 +1283,7 @@ socket.on("gameStateUpdate", (serverState) => {
 });
 socket.on('objectCreated', (payload) => {
     if (payload.type === 'smokeCloud') {
-        const { position, radius, lifespan } = payload.data;
-        createSmokeCloud(new THREE.Vector3(position.x, position.y, position.z), radius, lifespan);
+        createSmokeCloud(new THREE.Vector3(payload.data.position.x, payload.data.position.y, payload.data.position.z), payload.data.radius, payload.data.lifespan);
     } else {
         createObjectMesh(payload);
     }
@@ -865,6 +1294,28 @@ socket.on('objectDestroyed', (payload) => {
     if(type === 'machineGunBullet') containerName = 'machineGunBullets';
     if(type === 'ammoCrate') containerName = 'ammoCrates';
     
+    if (type === 'fire') {
+        const fire = gameObjects.fires[id];
+        if (fire) {
+            fire.particles.forEach(p => {
+                scene.remove(p.mesh);
+                p.mesh.geometry.dispose();
+                p.mesh.material.dispose();
+            });
+            delete gameObjects.fires[id];
+
+            const scorchMarkSize = payload.radius * 2.5;
+            const scorchMark = new THREE.Mesh(
+                new THREE.PlaneGeometry(scorchMarkSize, scorchMarkSize),
+                scorchMarkMaterial
+            );
+            scorchMark.position.set(payload.position.x, getHeightAt(payload.position.x, payload.position.z) + 0.1, payload.position.z);
+            scorchMark.rotation.x = -Math.PI / 2;
+            scene.add(scorchMark);
+        }
+        return;
+    }
+
     const objectList = gameObjects[containerName];
     const object = objectList ? objectList[id] : null;
 
@@ -932,6 +1383,10 @@ socket.on('playerHit', (data) => {
         createHitEffect(new THREE.Vector3(impactPoint.x, impactPoint.y, impactPoint.z), new THREE.Vector3(impulse.x, impulse.y, impulse.z));
     }
 });
+socket.on('terrainDeformed', (data) => {
+    updateTerrainMesh(data);
+});
 
 // --- START APLIKACJI ---
 initializeUI();
+animate(); // Uruchom główną pętlę animacji od razu
