@@ -1090,20 +1090,27 @@ function animate() {
         mouseDelta.set(0, 0);
 
         if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
-            // Get the world position of the barrel tip for the camera's location
+            // Pobierz pozycję końcówki lufy
             localPlayerMesh.barrelTip.getWorldPosition(sniperCameraPosition);
-    
-            // Calculate the forward direction vector in world space
-            const forwardVector = new THREE.Vector3(0, 0, 1);
-            const worldQuaternion = new THREE.Quaternion();
-            localPlayerMesh.barrelTip.getWorldQuaternion(worldQuaternion);
-            forwardVector.applyQuaternion(worldQuaternion);
-    
-            // Calculate the point to look at
-            const lookAtTargetPoint = sniperCameraPosition.clone().add(forwardVector.multiplyScalar(100));
             
-            // Position the camera and make it look at the target point
-            camera.position.lerp(sniperCameraPosition, 0.7);
+            // Stwórz pozycję kamery lekko NAD lufą
+            const sniperViewPosition = sniperCameraPosition.clone();
+            sniperViewPosition.y += 1.5;
+
+            // Oblicz wektor "do przodu" na podstawie pozycji lufy i jarzma
+            const mantletPosition = new THREE.Vector3();
+            localPlayerMesh.mantlet.getWorldPosition(mantletPosition);
+            const forwardVector = new THREE.Vector3().subVectors(sniperCameraPosition, mantletPosition).normalize();
+            
+            // Delikatnie skieruj kamerę w górę
+            forwardVector.y += 0.02; 
+            forwardVector.normalize();
+
+            // Oblicz punkt docelowy, na który patrzy kamera
+            const lookAtTargetPoint = sniperViewPosition.clone().add(forwardVector.multiplyScalar(100));
+            
+            // Ustaw pozycję i cel kamery
+            camera.position.lerp(sniperViewPosition, 0.7);
             camera.lookAt(lookAtTargetPoint);
         } else if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
             const dronePosition = new THREE.Vector3(localPlayerMesh.position.x, localPlayerMesh.position.y + 20, localPlayerMesh.position.z + 5);
