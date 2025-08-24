@@ -83,6 +83,9 @@ canvas {
   border-radius: 5px;
   cursor: grab;
 }
+.tank-canvas:active {
+    cursor: grabbing;
+}
 .premium-label {
   position: absolute;
   top: -15px;
@@ -347,59 +350,26 @@ canvas {
   100% { opacity: 0; transform: translateX(100%); }
 }
 
-
-
-
-/* Linie celownika (pionowa i pozioma) */
-#sniper-reticle::before, #sniper-reticle::after {
-  content: '';
-  position: absolute;
-  background-color: rgba(255, 0, 0, 0.7);
-  box-shadow: 0 0 5px rgba(255, 0, 0, 0.8);
-}
-
-/* Linia pionowa */
-#sniper-reticle::before {
-  width: 2px;
-  height: 150px;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
-/* Linia pozioma */
-#sniper-reticle::after {
-  width: 150px;
-  height: 2px;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
-
-/* --- STYLE TRYBU SNAJPERSKIEGO (ULEPSZONE) --- */
 #sniper-overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  display: none; /* Ukryty domyślnie */
-  pointer-events: none; /* Pozwala na klikanie "przez" nakładkę */
+  display: none;
+  pointer-events: none;
   z-index: 90;
-  /* Efekt winiety (przyciemnione krawędzie) */
   box-shadow: inset 0 0 20vw 10vw rgba(0,0,0,0.85);
-  background-color: rgba(0,0,0,0.2); /* Lekkie przyciemnienie całego ekranu */
+  background-color: rgba(0,0,0,0.2);
 }
 
 #sniper-reticle {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 50vh; /* Rozmiar celownika */
+  width: 50vh;
   height: 50vh;
   transform: translate(-50%, -50%);
-  /* Nowy celownik SVG */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3C!-- Cienkie linie pomocnicze --%3E%3Cpath d='M50 0 V35 M50 65 V100 M0 50 H35 M65 50 H100' stroke='rgba(255,0,0,0.4)' stroke-width='0.5'/%3E%3C!-- Główne, grubsze linie --%3E%3Cpath d='M50 40 V48 M50 52 V60 M40 50 H48 M52 50 H60' stroke='rgba(255,0,0,0.8)' stroke-width='1'/%3E%3C!-- Centralny punkt --%3E%3Ccircle cx='50' cy='50' r='0.75' fill='red'/%3E%3C!-- Okręgi --%3E%3Ccircle cx='50' cy='50' r='20' fill='none' stroke='rgba(255,0,0,0.3)' stroke-width='0.5'/%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='rgba(255,0,0,0.2)' stroke-width='0.5'/%3E%3C/svg%3E");
   background-size: contain;
   background-repeat: no-repeat;

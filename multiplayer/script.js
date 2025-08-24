@@ -6,9 +6,10 @@ import { createSkydomeBackground } from './background.js';
 let scene, renderer, clock, camera;
 let localPlayerId = null;
 let clientGameState = {};
-let selectionRenderers = [];
 let isGameStarted = false;
 let isSelectionScreenActive = false;
+let tankSelectionManager; // <-- Nowy menedżer dla ekranu wyboru
+
 let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial;
 let sandTrackMaterial, grassTrackMaterial;
@@ -345,18 +346,133 @@ function createSmokeCloud(position, radius, duration) {
     gameObjects.smokeClouds[Date.now()] = cloud;
 }
 
+// --- NOWA KLASA DO ZARZĄDZANIA EKRANEM WYBORU ---
+
+class TankSelectionManager {
+    constructor(tankKeys) {
+        this.tankKeys = tankKeys;
+        this.renderTargets = [];
+        this.isActive = false;
+        this.animationFrameId = null;
+    }
+
+    init() {
+        this.tankKeys.forEach(tankKey => {
+            const canvas = document.getElementById(`canvas-${tankKey}`);
+            if (!canvas || canvas.clientWidth === 0) {
+                console.error(`Canvas for ${tankKey} not found or has no size.`);
+                return;
+            }
+
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa));
+            tankMesh.scale.set(0.2, 0.2, 0.2);
+            tankMesh.position.y = -1.5;
+            scene.add(tankMesh);
+
+            camera.position.z = 5;
+
+            const target = {
+                canvas, scene, camera, renderer, tankMesh,
+                isDragging: false,
+                initialMouse: { x: 0, y: 0 },
+                initialRotation: { y: 0 }
+            };
+
+            this.addEventListeners(target);
+            this.renderTargets.push(target);
+        });
+
+        this.startAnimation();
+    }
+
+    addEventListeners(target) {
+        const { canvas, camera } = target;
+
+        canvas.addEventListener('mousedown', (e) => {
+            target.isDragging = true;
+            target.initialMouse.x = e.clientX;
+            target.initialRotation.y = target.tankMesh.rotation.y;
+        });
+
+        window.addEventListener('mouseup', () => {
+            target.isDragging = false;
+        });
+        
+        window.addEventListener('mousemove', (e) => {
+            if (!target.isDragging) return;
+            const deltaX = e.clientX - target.initialMouse.x;
+            target.tankMesh.rotation.y = target.initialRotation.y + deltaX * 0.01;
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSpeed = 0.5;
+            camera.position.z += e.deltaY > 0 ? zoomSpeed : -zoomSpeed;
+            camera.position.z = Math.max(3, Math.min(8, camera.position.z)); // Ograniczenie zoomu
+        });
+    }
+
+    startAnimation() {
+        this.isActive = true;
+        this.animate();
+    }
+
+    stopAnimation() {
+        this.isActive = false;
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+        }
+    }
+
+    animate() {
+        if (!this.isActive) return;
+
+        this.renderTargets.forEach(target => {
+            if (!target.isDragging) {
+                target.tankMesh.rotation.y += 0.005;
+            }
+            target.renderer.render(target.scene, target.camera);
+        });
+
+        this.animationFrameId = requestAnimationFrame(() => this.animate());
+    }
+
+    destroy() {
+        this.stopAnimation();
+        this.renderTargets.forEach(target => {
+            // Tutaj można dodać usuwanie event listenerów, jeśli to konieczne
+            target.renderer.dispose();
+            target.scene.traverse(obj => {
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) obj.material.dispose();
+            });
+        });
+        this.renderTargets = [];
+    }
+}
+
+
 // --- LOGIKA UI ---
 function initializeUI() {
     document.getElementById("intro-logo").addEventListener("animationend", () => {
         document.getElementById("intro-screen").style.display = "none"; 
         document.getElementById("start-screen").style.display = "flex";
         
-        // Uruchomienie z opóźnieniem, aby dać przeglądarce czas na renderowanie układu
         setTimeout(() => {
-            initSelectionScreenRenderers(); 
-            animateSelectionScreen(); 
             isSelectionScreenActive = true;
-        }, 0);
+            tankSelectionManager = new TankSelectionManager(Object.keys(TANKS_DATA));
+            tankSelectionManager.init();
+        }, 100); // Małe opóźnienie, by DOM się ustabilizował
     });
     Object.keys(TANKS_DATA).forEach((tankKey) => {
         const tank = TANKS_DATA[tankKey];
@@ -366,13 +482,16 @@ function initializeUI() {
     document.querySelectorAll(".select-button").forEach((button) => {
         button.addEventListener("click", (e) => {
             if (button.disabled) return; 
+
+            isSelectionScreenActive = false;
+            if (tankSelectionManager) tankSelectionManager.destroy();
+
             const card = e.target.closest(".tank-card"); const tankType = card.id.split("-")[1];
             const mapSize = document.querySelector('input[name="map-size"]:checked').value;
             const amplitude = parseInt(document.getElementById('terrain-amplitude').value, 10);
             const scale = parseInt(document.getElementById('terrain-scale').value, 10);
             socket.emit("joinGame", { tankType: tankType, config: { mapSize: mapSize, amplitude: amplitude, scale: scale } }); 
-            document.getElementById("start-screen").style.display = "none"; isSelectionScreenActive = false;
-            selectionRenderers.forEach(({ renderer }) => renderer.dispose()); selectionRenderers = [];
+            document.getElementById("start-screen").style.display = "none";
         });
     });
     const ampSlider = document.getElementById('terrain-amplitude'); const ampValue = document.getElementById('amplitude-value'); ampSlider.addEventListener('input', () => ampValue.textContent = ampSlider.value);
@@ -395,24 +514,7 @@ function initializeUI() {
         weaponBar.appendChild(slot);
     });
 }
-function initSelectionScreenRenderers() {
-    Object.keys(TANKS_DATA).forEach((tankKey) => {
-        const canvas = document.getElementById(`canvas-${tankKey}`); 
-        if (!canvas || canvas.clientWidth === 0) {
-            console.error(`Canvas for ${tankKey} not found or has no size.`);
-            return;
-        }
-        const scene = new THREE.Scene(); const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true }); renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-        scene.add(new THREE.AmbientLight(0xffffff, 1.2)); const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); dirLight.position.set(5, 10, 7); scene.add(dirLight);
-        const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa)); tankMesh.scale.set(0.2, 0.2, 0.2); tankMesh.position.y = -1.5; scene.add(tankMesh); camera.position.z = 5;
-        selectionRenderers.push({ scene, camera, renderer, tankMesh });
-    });
-}
-function animateSelectionScreen() {
-    if (!isSelectionScreenActive) return; requestAnimationFrame(animateSelectionScreen);
-    selectionRenderers.forEach((item) => { item.tankMesh.rotation.y += 0.01; item.renderer.render(item.scene, item.camera); });
-}
+
 function updateHUD() {
     const hudEl = document.getElementById('hud'); 
     const minimapEl = document.getElementById('minimap-container');
@@ -756,7 +858,14 @@ function updateTerrainMesh(data) {
 
 
 function animate() {
-    if (!isGameStarted) return; requestAnimationFrame(animate);
+    if (isSelectionScreenActive) {
+        // Pętla animacji jest teraz zarządzana przez TankSelectionManager
+        requestAnimationFrame(animate);
+        return;
+    }
+    if (!isGameStarted) return;
+    
+    requestAnimationFrame(animate);
     const delta = clock.getDelta();
     const localPlayerMesh = gameObjects.players[localPlayerId];
 
@@ -1017,6 +1126,7 @@ socket.on('serverStatus', (data) => {
 
         abramsCard.classList.remove('locked');
         abramsButton.disabled = false;
+        abramsButton.textContent = 'Wybierz i Walcz';
         if (premiumLabel) premiumLabel.style.display = 'none';
     }
 });
@@ -1115,3 +1225,4 @@ socket.on('terrainDeformed', (data) => {
 
 // --- START APLIKACJI ---
 initializeUI();
+animate(); // Uruchom główną pętlę animacji od razu
