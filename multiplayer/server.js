@@ -9,6 +9,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // --- Konfiguracja i stałe gry ---
+const IS_DEV_MODE = true; // <-- FEATURE FLAG DLA TRYBU DEWELOPERSKIEGO
 const PORT = process.env.PORT || 3000;
 const POWERUP_TYPES = ["turbo", "machinegun", "mines"]; 
 const PLAYER_COLLISION_RADIUS = 7;
@@ -758,11 +759,19 @@ function createProceduralCity() {
 
 io.on("connection", (socket) => {
   console.log(`Gracz połączony: ${socket.id}`);
-  if (isGameConfigured) {
-      socket.emit('serverStatus', { configured: true, settings: { mapSize: Object.keys(MAP_SIZES).find(key => MAP_SIZES[key] === MAP_SIZE), amplitude: TERRAIN_AMPLITUDE, scale: TERRAIN_SCALE } });
-  } else {
-      socket.emit('serverStatus', { configured: false });
-  }
+  
+  const settings = { 
+      mapSize: Object.keys(MAP_SIZES).find(key => MAP_SIZES[key] === MAP_SIZE), 
+      amplitude: TERRAIN_AMPLITUDE, 
+      scale: TERRAIN_SCALE 
+  };
+  
+  socket.emit('serverStatus', { 
+      configured: isGameConfigured, 
+      settings: isGameConfigured ? settings : undefined,
+      devMode: IS_DEV_MODE // Dodana informacja o trybie deweloperskim
+  });
+
 
   socket.on("joinGame", (data) => {
     if (gameState.players[socket.id]) return; 
@@ -771,7 +780,11 @@ io.on("connection", (socket) => {
         TERRAIN_AMPLITUDE = data.config.amplitude; TERRAIN_SCALE = data.config.scale;
         console.log("Serwer skonfigurowany przez pierwszego gracza:", data.config);
         generateHeightMap(); createProceduralCity();
-        socket.broadcast.emit('serverStatus', { configured: true, settings: { mapSize: data.config.mapSize, amplitude: TERRAIN_AMPLITUDE, scale: TERRAIN_SCALE } });
+        socket.broadcast.emit('serverStatus', { 
+            configured: true, 
+            settings: { mapSize: data.config.mapSize, amplitude: TERRAIN_AMPLITUDE, scale: TERRAIN_SCALE },
+            devMode: IS_DEV_MODE
+        });
     }
     const tankType = data.tankType; if (!TANKS_DATA[tankType]) return;
     const tankData = TANKS_DATA[tankType];

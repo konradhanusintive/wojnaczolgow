@@ -348,8 +348,15 @@ function createSmokeCloud(position, radius, duration) {
 // --- LOGIKA UI ---
 function initializeUI() {
     document.getElementById("intro-logo").addEventListener("animationend", () => {
-        document.getElementById("intro-screen").style.display = "none"; document.getElementById("start-screen").style.display = "flex";
-        initSelectionScreenRenderers(); animateSelectionScreen(); isSelectionScreenActive = true;
+        document.getElementById("intro-screen").style.display = "none"; 
+        document.getElementById("start-screen").style.display = "flex";
+        
+        // Uruchomienie z opóźnieniem, aby dać przeglądarce czas na renderowanie układu
+        setTimeout(() => {
+            initSelectionScreenRenderers(); 
+            animateSelectionScreen(); 
+            isSelectionScreenActive = true;
+        }, 0);
     });
     Object.keys(TANKS_DATA).forEach((tankKey) => {
         const tank = TANKS_DATA[tankKey];
@@ -390,7 +397,12 @@ function initializeUI() {
 }
 function initSelectionScreenRenderers() {
     Object.keys(TANKS_DATA).forEach((tankKey) => {
-        const canvas = document.getElementById(`canvas-${tankKey}`); const scene = new THREE.Scene(); const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+        const canvas = document.getElementById(`canvas-${tankKey}`); 
+        if (!canvas || canvas.clientWidth === 0) {
+            console.error(`Canvas for ${tankKey} not found or has no size.`);
+            return;
+        }
+        const scene = new THREE.Scene(); const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true }); renderer.setSize(canvas.clientWidth, canvas.clientHeight);
         scene.add(new THREE.AmbientLight(0xffffff, 1.2)); const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); dirLight.position.set(5, 10, 7); scene.add(dirLight);
         const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa)); tankMesh.scale.set(0.2, 0.2, 0.2); tankMesh.position.y = -1.5; scene.add(tankMesh); camera.position.z = 5;
@@ -996,6 +1008,17 @@ socket.on('serverStatus', (data) => {
         const scaleSlider = document.getElementById('terrain-scale'); const scaleValue = document.getElementById('scale-value');
         scaleSlider.value = data.settings.scale; scaleValue.textContent = data.settings.scale;
     } else { console.log("Serwer oczekuje na konfigurację."); }
+    
+    if (data.devMode) {
+        console.log("Tryb deweloperski AKTYWNY. Odblokowywanie zawartości premium.");
+        const abramsCard = document.getElementById('select-abrams');
+        const abramsButton = abramsCard.querySelector('button');
+        const premiumLabel = abramsCard.querySelector('.premium-label');
+
+        abramsCard.classList.remove('locked');
+        abramsButton.disabled = false;
+        if (premiumLabel) premiumLabel.style.display = 'none';
+    }
 });
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
 socket.on("gameStateUpdate", (serverState) => {
