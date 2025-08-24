@@ -73,6 +73,7 @@ const gameState = {
   missiles: {},
   machineGunBullets: {},
   tracks: {},
+  fires: {}, // Nowy stan do zarządzania ogniem
 };
 
 let nextObjectId = 0;
@@ -561,6 +562,21 @@ function gameLoop() {
                         gameState.smokeClouds[cloudId] = { id: cloudId, position: impactPoint, radius: p.blastRadius, lifespan: 20.0 };
                         io.emit('objectCreated', { type: 'smokeCloud', data: gameState.smokeClouds[cloudId] });
                     }
+                } else if (p.weaponId === 'heat') {
+                    const fireId = `fire_${nextObjectId++}`;
+                    const fire = {
+                        id: fireId,
+                        ownerId: p.ownerId,
+                        position: impactPoint,
+                        lifespan: 20.0,
+                        initialRadius: 4.0,
+                        maxRadius: 10.0,
+                        radius: 4.0,
+                        damage: 5,
+                        damageCooldown: {}
+                    };
+                    gameState.fires[fireId] = fire;
+                    io.emit('objectCreated', { type: 'fire', data: fire });
                 }
                 delete projGroup.list[id]; 
                 io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true, weaponId: p.weaponId }); 
@@ -614,6 +630,44 @@ function gameLoop() {
                 delete gameState.mines[mineId]; 
                 io.emit('objectDestroyed', {type: 'mine', id: mineId, hit: true}); 
                 break; 
+            }
+        }
+    }
+
+    // Nowa pętla dla logiki ognia
+    for (const fireId in gameState.fires) {
+        const fire = gameState.fires[fireId];
+        fire.lifespan -= delta;
+
+        // Aktualizacja cooldownu obrażeń dla każdego gracza
+        for (const playerId in fire.damageCooldown) {
+            if (fire.damageCooldown[playerId] > 0) {
+                fire.damageCooldown[playerId] -= delta;
+            }
+        }
+        
+        // Sprawdzanie, czy ogień wygasł
+        if (fire.lifespan <= 0) {
+            io.emit('objectDestroyed', { type: 'fire', id: fireId, position: fire.position, radius: fire.maxRadius });
+            delete gameState.fires[fireId];
+            continue;
+        }
+
+        // Rozprzestrzenianie się ognia
+        const lifePercent = 1 - (fire.lifespan / 20.0); // 20.0 to początkowy czas życia
+        fire.radius = lerp(fire.initialRadius, fire.maxRadius, lifePercent);
+
+        // Zadawanie obrażeń graczom w ogniu
+        for (const playerId in gameState.players) {
+            const player = gameState.players[playerId];
+            if (player.isDestroyed || player.isSinking) continue;
+
+            const dist = Math.sqrt((player.position.x - fire.position.x)**2 + (player.position.z - fire.position.z)**2);
+            if (dist < fire.radius) {
+                if (!fire.damageCooldown[playerId] || fire.damageCooldown[playerId] <= 0) {
+                    handleDamage(player, fire.damage, fire.ownerId);
+                    fire.damageCooldown[playerId] = 1.0; // 1 sekunda nietykalności
+                }
             }
         }
     }

@@ -11,7 +11,7 @@ let isSelectionScreenActive = false;
 let tankSelectionManager; // <-- Nowy menedżer dla ekranu wyboru
 
 let brickMaterial;
-let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial;
+let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial, fireMaterial, scorchMarkMaterial;
 let sandTrackMaterial, grassTrackMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
@@ -56,7 +56,8 @@ const gameObjects = {
     wreckage: [],
     smokeParticles: [], 
     tracks: {},
-    craters: {}
+    craters: {},
+    fires: {}, // Nowy obiekt do przechowywania efektów ognia
 };
 
 const socket = io();
@@ -253,6 +254,21 @@ function createSmokeTexture() {
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1)'); gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(canvas);
 }
+function createFireTexture() {
+    const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, 'rgba(255, 200, 50, 1)');
+    gradient.addColorStop(0.5, 'rgba(255, 80, 0, 0.7)');
+    gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(canvas);
+}
+function createScorchMarkTexture() {
+    const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext("2d");
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, "rgba(20, 10, 0, 0.8)");
+    gradient.addColorStop(1, "rgba(20, 10, 0, 0)");
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(canvas);
+}
 function createMuzzleFlashTexture() {
     const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128;
     const ctx = canvas.getContext("2d");
@@ -335,7 +351,7 @@ function createSmokeCloud(position, radius, duration) {
         const pMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cloudSmokeMaterial.clone());
         const p = {
             mesh: pMesh,
-            velocity: new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.5, (Math.random() - 0.5) * 0.5),
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.5, (Math.random() - 0.5) * 0.5 ),
             startPos: new THREE.Vector3( (Math.random() - 0.5) * radius * 0.8, Math.random() * radius * 0.3, (Math.random() - 0.5) * radius * 0.8 ),
             startSize: radius * (0.8 + Math.random() * 0.5),
         };
@@ -344,6 +360,37 @@ function createSmokeCloud(position, radius, duration) {
         scene.add(p.mesh);
     }
     gameObjects.smokeClouds[Date.now()] = cloud;
+}
+function createFireEffect(fireData) {
+    const fireObject = {
+        id: fireData.id,
+        particles: [],
+        position: new THREE.Vector3(fireData.position.x, fireData.position.y, fireData.position.z)
+    };
+    const particleCount = 70;
+    for (let i = 0; i < particleCount; i++) {
+        const pMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMaterial.clone());
+        const lifespan = 0.5 + Math.random() * 0.8;
+        const p = {
+            mesh: pMesh,
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 4 + 2, (Math.random() - 0.5) * 2),
+            initialLifespan: lifespan,
+            lifespan: lifespan,
+            startSize: 1.5 + Math.random() * 2,
+            endSize: 0,
+        };
+        const spawnRadius = fireData.initialRadius * 0.5;
+        p.mesh.position.copy(fireObject.position).add(
+            new THREE.Vector3(
+                (Math.random() - 0.5) * spawnRadius,
+                Math.random() * 1.5,
+                (Math.random() - 0.5) * spawnRadius
+            )
+        );
+        fireObject.particles.push(p);
+        scene.add(p.mesh);
+    }
+    gameObjects.fires[fireData.id] = fireObject;
 }
 
 // --- NOWA KLASA DO ZARZĄDZANIA EKRANEM WYBORU ---
@@ -633,6 +680,11 @@ function initGame(payload) {
     
     sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
     grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
+    
+    // Inicjalizacja materiałów do ognia i pogorzeliska
+    fireMaterial = new THREE.MeshBasicMaterial({ map: createFireTexture(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+    scorchMarkMaterial = new THREE.MeshBasicMaterial({ map: createScorchMarkTexture(), transparent: true, depthWrite: false });
+
 
     reconcileGameState(clientGameState); 
     setupEventListeners(); 
@@ -806,6 +858,9 @@ function createObjectMesh(payload) {
             newMesh.rotation.x = -Math.PI / 2;
             newMesh.rotation.z = data.rotationY;
             break;
+        case 'fire': // Nowy case dla ognia
+            createFireEffect(data);
+            return; // Zakończ, ponieważ funkcja createFireEffect zarządza dodawaniem do gameObjects
     }
     if (newMesh) {
         newMesh.position.set(data.position.x, data.position.y + (type === 'track' ? 0.06 : 0), data.position.z);
@@ -994,6 +1049,39 @@ function animate() {
         }
     }
 
+    // Pętla animacji dla ognia
+    for (const id in gameObjects.fires) {
+        const fire = gameObjects.fires[id];
+        const serverFire = clientGameState.fires[id];
+        if (!serverFire) continue;
+
+        const currentRadius = serverFire.radius;
+
+        for (let i = fire.particles.length - 1; i >= 0; i--) {
+            const p = fire.particles[i];
+            p.lifespan -= delta;
+            if (p.lifespan <= 0) {
+                // Reset cząsteczki zamiast usuwania
+                p.lifespan = p.initialLifespan;
+                const spawnRadius = currentRadius * 0.5;
+                p.mesh.position.copy(fire.position).add(
+                    new THREE.Vector3(
+                        (Math.random() - 0.5) * spawnRadius,
+                        Math.random() * 1.5,
+                        (Math.random() - 0.5) * spawnRadius
+                    )
+                );
+            } else {
+                p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
+                const lifePercent = p.lifespan / p.initialLifespan;
+                p.mesh.material.opacity = Math.sin(lifePercent * Math.PI);
+                const currentScale = p.startSize + (p.endSize - p.startSize) * (1 - lifePercent);
+                p.mesh.scale.set(currentScale, currentScale, currentScale);
+                p.mesh.lookAt(camera.position);
+            }
+        }
+    }
+
     const gravity = -9.8;
     for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
         const p = gameObjects.particles[i]; p.lifespan -= delta;
@@ -1166,8 +1254,7 @@ socket.on("gameStateUpdate", (serverState) => {
 });
 socket.on('objectCreated', (payload) => {
     if (payload.type === 'smokeCloud') {
-        const { position, radius, lifespan } = payload.data;
-        createSmokeCloud(new THREE.Vector3(position.x, position.y, position.z), radius, lifespan);
+        createSmokeCloud(payload.data);
     } else {
         createObjectMesh(payload);
     }
@@ -1178,6 +1265,30 @@ socket.on('objectDestroyed', (payload) => {
     if(type === 'machineGunBullet') containerName = 'machineGunBullets';
     if(type === 'ammoCrate') containerName = 'ammoCrates';
     
+    // Specjalna obsługa dla ognia
+    if (type === 'fire') {
+        const fire = gameObjects.fires[id];
+        if (fire) {
+            fire.particles.forEach(p => {
+                scene.remove(p.mesh);
+                p.mesh.geometry.dispose();
+                p.mesh.material.dispose();
+            });
+            delete gameObjects.fires[id];
+
+            // Stwórz pogorzelisko
+            const scorchMarkSize = payload.radius * 2.5;
+            const scorchMark = new THREE.Mesh(
+                new THREE.PlaneGeometry(scorchMarkSize, scorchMarkSize),
+                scorchMarkMaterial
+            );
+            scorchMark.position.set(payload.position.x, getHeightAt(payload.position.x, payload.position.z) + 0.1, payload.position.z);
+            scorchMark.rotation.x = -Math.PI / 2;
+            scene.add(scorchMark);
+        }
+        return;
+    }
+
     const objectList = gameObjects[containerName];
     const object = objectList ? objectList[id] : null;
 
