@@ -858,9 +858,9 @@ function createObjectMesh(payload) {
             newMesh.rotation.x = -Math.PI / 2;
             newMesh.rotation.z = data.rotationY;
             break;
-        case 'fire': // Nowy case dla ognia
+        case 'fire':
             createFireEffect(data);
-            return; // Zakończ, ponieważ funkcja createFireEffect zarządza dodawaniem do gameObjects
+            return;
     }
     if (newMesh) {
         newMesh.position.set(data.position.x, data.position.y + (type === 'track' ? 0.06 : 0), data.position.z);
@@ -1178,30 +1178,23 @@ function animate() {
         mouseDelta.set(0, 0);
 
         if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
-            // Pobierz specyficzne dane dla aktualnego czołgu
             const tankData = TANKS_DATA[localPlayerState.tankType];
             const cameraOffsetY = tankData.sniperCamYOffset || 1.5;
 
-            // Pobierz pozycję końcówki lufy
             localPlayerMesh.barrelTip.getWorldPosition(sniperCameraPosition);
             
-            // Stwórz pozycję kamery lekko NAD lufą, używając specyficznego offsetu
             const sniperViewPosition = sniperCameraPosition.clone();
             sniperViewPosition.y += cameraOffsetY;
 
-            // Oblicz wektor "do przodu"
             const mantletPosition = new THREE.Vector3();
             localPlayerMesh.mantlet.getWorldPosition(mantletPosition);
             const forwardVector = new THREE.Vector3().subVectors(sniperCameraPosition, mantletPosition).normalize();
             
-            // Delikatnie skieruj kamerę w górę
             forwardVector.y += 0.02; 
             forwardVector.normalize();
 
-            // Oblicz punkt docelowy, na który patrzy kamera
             const lookAtTargetPoint = sniperViewPosition.clone().add(forwardVector.multiplyScalar(100));
             
-            // Ustaw pozycję i cel kamery
             camera.position.lerp(sniperViewPosition, 0.7);
             camera.lookAt(lookAtTargetPoint);
         } else if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
@@ -1254,7 +1247,7 @@ socket.on("gameStateUpdate", (serverState) => {
 });
 socket.on('objectCreated', (payload) => {
     if (payload.type === 'smokeCloud') {
-        createSmokeCloud(payload.data);
+        createSmokeCloud(new THREE.Vector3(payload.data.position.x, payload.data.position.y, payload.data.position.z), payload.data.radius, payload.data.lifespan);
     } else {
         createObjectMesh(payload);
     }
