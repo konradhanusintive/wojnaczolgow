@@ -878,7 +878,12 @@ function initGame(payload) {
     
     const waterGeometry = new THREE.PlaneGeometry(terrainParams.size * 5, terrainParams.size * 5);
     const waterMaterial = new THREE.MeshStandardMaterial({ color: 0x006994, metalness: 0.1, roughness: 0.2, transparent: true, opacity: 0.75, name: 'waterMaterial' }); // Jawna nazwa
-    const water = new THREE.Mesh(waterGeometry, waterMaterial); water.rotation.x = -Math.PI / 2; water.position.y = -0.5; scene.add(water);
+    // Reduce flickering by preventing water from writing to depth and slightly biasing it
+    waterMaterial.depthWrite = false;
+    waterMaterial.polygonOffset = true;
+    waterMaterial.polygonOffsetFactor = -1;
+    waterMaterial.polygonOffsetUnits = -1;
+    const water = new THREE.Mesh(waterGeometry, waterMaterial); water.rotation.x = -Math.PI / 2; water.position.y = -0.5; water.renderOrder = 1; scene.add(water);
     if (payload.spawnPoints) { for(const sp of payload.spawnPoints) { const marker = createSpawnMarker(); marker.position.set(sp.x, getHeightAt(sp.x, sp.z), sp.z); scene.add(marker); } }
     const smokeTexture = createSmokeTexture();
     greySmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x888888, depthWrite: false, name: 'greySmokeMaterial' }); // Jawna nazwa
