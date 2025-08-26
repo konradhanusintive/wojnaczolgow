@@ -11,6 +11,8 @@ import {
 } from './tankModels.js'; 
 
 let scene, renderer, clock, camera;
+const WATER_LEVEL = -0.5; // Keep consistent with water.position.y
+let water, waterMaterial, waterMaskCanvas, waterMaskCtx, waterMaskTexture;
 let localPlayerId = null;
 let clientGameState = {};
 let isGameStarted = false;
@@ -876,14 +878,21 @@ function initGame(payload) {
     terrainMesh = new THREE.Mesh(terrainGeometry, groundMaterial); terrainMesh.rotation.x = -Math.PI / 2; terrainMesh.name = 'ground';
     terrainMesh.receiveShadow = true; scene.add(terrainMesh); aimables.push(terrainMesh);
     
-    const waterGeometry = new THREE.PlaneGeometry(terrainParams.size * 5, terrainParams.size * 5);
-    const waterMaterial = new THREE.MeshStandardMaterial({ color: 0x006994, metalness: 0.1, roughness: 0.2, transparent: true, opacity: 0.75, name: 'waterMaterial' }); // Jawna nazwa
-    // Reduce flickering by preventing water from writing to depth and slightly biasing it
-    waterMaterial.depthWrite = false;
-    waterMaterial.polygonOffset = true;
-    waterMaterial.polygonOffsetFactor = -1;
-    waterMaterial.polygonOffsetUnits = -1;
-    const water = new THREE.Mesh(waterGeometry, waterMaterial); water.rotation.x = -Math.PI / 2; water.position.y = -0.5; water.renderOrder = 1; scene.add(water);
+    // Create a dynamic water mask texture to let water "flow" into craters
+    waterMaskCanvas = document.createElement('canvas');
+    waterMaskCanvas.width = 1024; waterMaskCanvas.height = 1024;
+    waterMaskCtx = waterMaskCanvas.getContext('2d');
+    waterMaskCtx.fillStyle = 'black';
+    waterMaskCtx.fillRect(0, 0, waterMaskCanvas.width, waterMaskCanvas.height);
+    waterMaskTexture = new THREE.CanvasTexture(waterMaskCanvas);
+
+    const waterGeometry = new THREE.PlaneGeometry(terrainParams.size, terrainParams.size, 1, 1);
+    waterMaterial = new THREE.MeshStandardMaterial({ color: 0x006994, metalness: 0.1, roughness: 0.2, transparent: true, opacity: 0.75, name: 'waterMaterial' }); // Jawna nazwa
+    // Reduce flickering
+    waterMaterial.depthWrite = false; waterMaterial.polygonOffset = true; waterMaterial.polygonOffsetFactor = -1; waterMaterial.polygonOffsetUnits = -1;
+    // Use the mask as an alpha map so only allowed areas show water
+    waterMaterial.alphaMap = waterMaskTexture; waterMaterial.transparent = true;
+    water = new THREE.Mesh(waterGeometry, waterMaterial); water.rotation.x = -Math.PI / 2; water.position.y = WATER_LEVEL; water.renderOrder = 1; scene.add(water);
     if (payload.spawnPoints) { for(const sp of payload.spawnPoints) { const marker = createSpawnMarker(); marker.position.set(sp.x, getHeightAt(sp.x, sp.z), sp.z); scene.add(marker); } }
     const smokeTexture = createSmokeTexture();
     greySmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0x888888, depthWrite: false, name: 'greySmokeMaterial' }); // Jawna nazwa
@@ -1177,6 +1186,57 @@ function updateTerrainMesh(data) {
     }
     terrainMesh.geometry.attributes.position.needsUpdate = true;
     terrainMesh.geometry.computeVertexNormals();
+
+    // Update water mask: flood fill from edges where terrain is below WATER_LEVEL
+    if (waterMaskCtx && terrainParams) {
+        const w = waterMaskCanvas.width, h = waterMaskCanvas.height;
+        const img = waterMaskCtx.getImageData(0, 0, w, h);
+        const dataArr = img.data;
+        const toIdx = (x, y) => (y * w + x) * 4;
+        // Clear
+        for (let p = 0; p < dataArr.length; p += 4) { dataArr[p] = 0; dataArr[p+1] = 0; dataArr[p+2] = 0; dataArr[p+3] = 255; }
+        // BFS queue from edges where terrain is below water level
+        const queue = [];
+        const visited = new Uint8Array(w * h);
+        const worldToGrid = (X, Z) => {
+            const gx = Math.floor((X + size / 2) / size * (w - 1));
+            const gy = Math.floor((Z + size / 2) / size * (h - 1));
+            return { gx: Math.max(0, Math.min(w - 1, gx)), gy: Math.max(0, Math.min(h - 1, gy)) };
+        };
+        // Seed along borders where height < WATER_LEVEL
+        const samples = 256;
+        for (let s = 0; s < samples; s++) {
+            const t = s / (samples - 1);
+            const xWorld = -size/2 + t * size;
+            // Top and bottom edges
+            for (const zWorld of [-size/2, size/2]) {
+                const hVal = getHeightAt(xWorld, zWorld);
+                if (hVal <= WATER_LEVEL + 0.01) { const { gx, gy } = worldToGrid(xWorld, zWorld); queue.push([gx, gy]); }
+            }
+            const zWorld = -size/2 + t * size;
+            for (const xWorld2 of [-size/2, size/2]) {
+                const hVal2 = getHeightAt(xWorld2, zWorld);
+                if (hVal2 <= WATER_LEVEL + 0.01) { const { gx, gy } = worldToGrid(xWorld2, zWorld); queue.push([gx, gy]); }
+            }
+        }
+        // Flood fill: propagate through cells where terrain height <= water level
+        const neighbors = [[1,0],[-1,0],[0,1],[0,-1]];
+        while (queue.length) {
+            const [x, y] = queue.shift();
+            const id = y * w + x; if (visited[id]) continue; visited[id] = 1;
+            // Mark water mask white
+            const idx = toIdx(x, y); dataArr[idx] = 255; dataArr[idx+1] = 255; dataArr[idx+2] = 255;
+            for (const [dx, dz] of neighbors) {
+                const nx = x + dx, ny = y + dz;
+                if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                const worldX = -size/2 + nx / (w - 1) * size;
+                const worldZ = -size/2 + ny / (h - 1) * size;
+                if (getHeightAt(worldX, worldZ) <= WATER_LEVEL + 0.01) queue.push([nx, ny]);
+            }
+        }
+        waterMaskCtx.putImageData(img, 0, 0);
+        if (waterMaskTexture) { waterMaskTexture.needsUpdate = true; }
+    }
 }
 
 function animate() {
