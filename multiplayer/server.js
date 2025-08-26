@@ -449,6 +449,7 @@ function gameLoop() {
                  const newPosZ = player.position.z + moveVector.z;
                 
                  if (!checkEnvironmentCollision(player, newPosX, newPosZ)) {
+                    player.prevPosition = { x: player.position.x, y: player.position.y, z: player.position.z };
                      player.position.x = newPosX;
                      player.position.z = newPosZ;
                  }
@@ -517,8 +518,12 @@ function gameLoop() {
                 const distSq = (player.position.x - tree.position.x)**2 + (player.position.z - tree.position.z)**2;
                 if (distSq < (PLAYER_COLLISION_RADIUS + TREE_COLLISION_RADIUS)**2) {
                     tree.state = 'fallen';
-                    const fallDirectionX = tree.position.x - player.position.x;
-                    const fallDirectionZ = tree.position.z - player.position.z;
+                    // kierunek upadku = kierunek jazdy czołgu w chwili kontaktu
+                    const dirX = player.position.x - player.prevPosition.x;
+                    const dirZ = player.position.z - player.prevPosition.z;
+                    const isMoving = Math.abs(dirX) + Math.abs(dirZ) > 0.001;
+                    const fallDirectionX = isMoving ? dirX : (tree.position.x - player.position.x);
+                    const fallDirectionZ = isMoving ? dirZ : (tree.position.z - player.position.z);
                     const len = Math.sqrt(fallDirectionX**2 + fallDirectionZ**2) || 1;
                     const normalizedFallX = fallDirectionX / len;
                     const normalizedFallZ = fallDirectionZ / len;
@@ -845,6 +850,21 @@ function createInitialEnvironment() {
     
     gameState.trees = [];
     let treesPlaced = 0;
+    // Centra biomów (klastry lasów)
+    const FOREST_CLUSTERS = [
+        { x: -MAP_SIZE * 0.25, z: 0, type: 'conifer' },
+        { x: MAP_SIZE * 0.25, z: MAP_SIZE * 0.2, type: 'deciduous' },
+        { x: MAP_SIZE * 0.25, z: -MAP_SIZE * 0.2, type: 'mixed' }
+    ];
+    const pickTypeIndex = (biome) => {
+        // Indeksy muszą odpowiadać listom na kliencie (TREE_TYPES)
+        const conifer = [0, 1, 5];
+        const decid = [2, 3, 4];
+        const all = [0,1,2,3,4,5,6];
+        switch (biome) { case 'conifer': return conifer[Math.floor(Math.random()*conifer.length)];
+            case 'deciduous': return decid[Math.floor(Math.random()*decid.length)];
+            default: return all[Math.floor(Math.random()*all.length)]; }
+    };
     for (let i = 0; i < PINE_TREE_COUNT; i++) {
         let x, z, isValidPosition = false, attempts = 0;
         while (!isValidPosition && attempts < 20) {
@@ -865,12 +885,21 @@ function createInitialEnvironment() {
         if (isValidPosition) {
             const y = getHeightAt(x, z);
             const scale = 0.9 + Math.random() * 0.8;
+            // Wybierz najbliższy klaster i typ drzewa
+            let nearest = FOREST_CLUSTERS[0];
+            let minD = Infinity;
+            for (const c of FOREST_CLUSTERS) {
+                const d = (x - c.x)**2 + (z - c.z)**2;
+                if (d < minD) { minD = d; nearest = c; }
+            }
+            const typeIndex = pickTypeIndex(nearest.type);
             gameState.trees.push({
                 id: treesPlaced,
                 position: { x, y, z },
                 scale: scale,
                 rotationY: Math.random() * Math.PI * 2,
-                state: 'standing'
+                state: 'standing',
+                type: typeIndex
             });
             treesPlaced++;
         }
@@ -946,6 +975,7 @@ io.on("connection", (socket) => {
       medkits: 3, score: 0, isDestroyed: false, respawnTimer: 0, keys: {},
       isSinking: false, sinkingTimer: 0, sinkingAngle: { x: 0, z: 0 },
       impulse: { x: 0, y: 0, z: 0 },
+      prevPosition: { ...startPos },
       lastTrackPos: { ...startPos },
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
       isEmpDisabled: false, empDisableTimer: 0,

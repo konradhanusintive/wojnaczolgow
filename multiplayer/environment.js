@@ -107,10 +107,11 @@ const foliageMaterial = new THREE.MeshLambertMaterial({
 function createBeautifulPineTreeMesh() {
     const treeGroup = new THREE.Group();
     const trunkHeight = 8 + Math.random() * 7;
-    const trunkRadius = 0.3 + Math.random() * 0.4;
+    const trunkRadius = 0.25 + Math.random() * 0.55; // większa zmienność grubości
     
     const trunkGeometry = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 10);
-    const trunkMesh = new THREE.Mesh(trunkGeometry, trunkMaterial);
+    const trunkMatVar = trunkMaterial.clone(); trunkMatVar.color = new THREE.Color().setHSL(0.07, 0.5, 0.25 + Math.random()*0.15);
+    const trunkMesh = new THREE.Mesh(trunkGeometry, trunkMatVar);
     trunkMesh.position.y = trunkHeight / 2; // <-- Ważna zmiana: pivot pnia na dole
     
     const foliageGeometries = [];
@@ -167,7 +168,8 @@ function noisySphere(radius, detail = 2, strength = 0.25) {
 function createRoundDeciduousTree() {
     const group = new THREE.Group();
     const h = 7 + Math.random() * 5;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, h, 12), trunkMaterial);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3 + Math.random()*0.3, 0.4 + Math.random()*0.3, h, 12), trunkMaterial.clone());
+    trunk.material.color = new THREE.Color().setHSL(0.08, 0.5, 0.28 + Math.random()*0.18);
     trunk.position.y = h / 2;
     group.add(trunk);
     const mat = new THREE.MeshLambertMaterial({ color: LEAF_COLORS[Math.floor(Math.random()*LEAF_COLORS.length)] });
@@ -180,7 +182,8 @@ function createRoundDeciduousTree() {
 function createBoxyDeciduousTree() {
     const group = new THREE.Group();
     const h = 6.5 + Math.random() * 5;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, h, 10), trunkMaterial);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28 + Math.random()*0.35, 0.38 + Math.random()*0.35, h, 10), trunkMaterial.clone());
+    trunk.material.color = new THREE.Color().setHSL(0.07, 0.5, 0.26 + Math.random()*0.2);
     trunk.position.y = h / 2; group.add(trunk);
     const mat = new THREE.MeshLambertMaterial({ color: LEAF_COLORS[Math.floor(Math.random()*LEAF_COLORS.length)] });
     const crown = new THREE.Group();
@@ -197,7 +200,8 @@ function createBoxyDeciduousTree() {
 function createLowPolyDeciduousTree() {
     const group = new THREE.Group();
     const h = 7 + Math.random()*5;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, h, 8), trunkMaterial);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25 + Math.random()*0.3, 0.35 + Math.random()*0.3, h, 8), trunkMaterial.clone());
+    trunk.material.color = new THREE.Color().setHSL(0.07, 0.5, 0.24 + Math.random()*0.2);
     trunk.position.y = h/2; group.add(trunk);
     const mat = new THREE.MeshLambertMaterial({ color: LEAF_COLORS[Math.floor(Math.random()*LEAF_COLORS.length)] });
     const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(3 + Math.random()*1.0), mat);
@@ -208,7 +212,8 @@ function createLowPolyDeciduousTree() {
 function createConiferStackedCones() {
     const group = new THREE.Group();
     const h = 9 + Math.random()*7;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, h, 10), trunkMaterial);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3 + Math.random()*0.3, 0.45 + Math.random()*0.35, h, 10), trunkMaterial.clone());
+    trunk.material.color = new THREE.Color().setHSL(0.07, 0.5, 0.24 + Math.random()*0.2);
     trunk.position.y = h/2; group.add(trunk);
     const mat = new THREE.MeshLambertMaterial({ color: 0x3c6b4b });
     const tiers = 6 + Math.floor(Math.random()*3);
@@ -225,7 +230,8 @@ function createConiferStackedCones() {
 function createCypressSlim() {
     const group = new THREE.Group();
     const h = 10 + Math.random()*8;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, h, 8), trunkMaterial);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22 + Math.random()*0.2, 0.27 + Math.random()*0.2, h, 8), trunkMaterial.clone());
+    trunk.material.color = new THREE.Color().setHSL(0.07, 0.5, 0.22 + Math.random()*0.18);
     trunk.position.y = h/2; group.add(trunk);
     const mat = new THREE.MeshLambertMaterial({ color: 0x2e6b3f });
     const cone = new THREE.Mesh(new THREE.ConeGeometry(2.2, h*0.95, 18), mat);
@@ -236,8 +242,9 @@ function createCypressSlim() {
 function createPalmModern() {
     const group = new THREE.Group();
     const h = 11 + Math.random()*7;
-    const trunkGeo = new THREE.CylinderGeometry(0.25, 0.45, h, 10, 12, true);
-    const trunkMesh = new THREE.Mesh(trunkGeo, trunkMaterial);
+    const trunkGeo = new THREE.CylinderGeometry(0.22 + Math.random()*0.15, 0.4 + Math.random()*0.2, h, 10, 12, true);
+    const trunkMesh = new THREE.Mesh(trunkGeo, trunkMaterial.clone());
+    trunkMesh.material.color = new THREE.Color().setHSL(0.08, 0.5, 0.28 + Math.random()*0.18);
     trunkMesh.position.y = h/2; group.add(trunkMesh);
     const leafMat = new THREE.MeshLambertMaterial({ color: 0x2fa168 });
     for(let i=0;i<10;i++){

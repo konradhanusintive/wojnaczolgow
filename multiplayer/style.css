@@ -612,7 +612,8 @@ canvas {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.6); 
+    /* Removed darkening filter during zoom/sniper mode */
+    background-color: transparent; 
     display: none; 
     z-index: 99; 
     cursor: none; 
