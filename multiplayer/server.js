@@ -642,6 +642,14 @@ function gameLoop() {
                     };
                     gameState.fires[fireId] = fire;
                     io.emit('objectCreated', { type: 'fire', data: fire });
+                    // Ignite nearby trees on HEAT impact
+                    const IGNITE_RADIUS = 9.0;
+                    for (const tree of gameState.trees) {
+                        const dist = Math.sqrt((tree.position.x - impactPoint.x)**2 + (tree.position.z - impactPoint.z)**2);
+                        if (dist <= IGNITE_RADIUS) {
+                            io.emit('treeIgnited', { treeId: tree.id });
+                        }
+                    }
                 }
                 delete projGroup.list[id]; 
                 io.emit('objectDestroyed', { type: projGroup.type, id: id, hit: true, weaponId: p.weaponId }); 

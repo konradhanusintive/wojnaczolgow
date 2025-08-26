@@ -74,6 +74,16 @@ const gameObjects = {
     treeBounds: {}
 };
 
+// Performance settings for fire effects
+const FIRE_SETTINGS = {
+    MAX_TOTAL_PARTICLES: 1200,
+    MAX_PER_FIRE: 120,
+    FAR_CULL_DIST: 220,
+    MID_DIST: 120,
+    PER_FRAME_FRACTION: 0.25
+};
+let currentFireParticleCount = 0;
+
 const socket = io();
 
 // --- STAŁE I DANE ---
@@ -524,9 +534,14 @@ function createFireEffect(fireData) {
     const fireObject = {
         id: fireData.id,
         particles: [],
-        position: new THREE.Vector3(fireData.position.x, fireData.position.y, fireData.position.z)
+        position: new THREE.Vector3(fireData.position.x, fireData.position.y, fireData.position.z),
+        height: fireData.height || 2.5
     };
-    const particleCount = 70;
+    // Budget particles per fire and globally
+    const targetCount = fireData.particleCount || Math.floor(80 + (fireObject.height * 12));
+    const maxPerFire = Math.min(FIRE_SETTINGS.MAX_PER_FIRE, targetCount);
+    const available = Math.max(0, FIRE_SETTINGS.MAX_TOTAL_PARTICLES - currentFireParticleCount);
+    const particleCount = Math.min(maxPerFire, available);
     const fireEffectTexture = createFireTexture();
     if (!fireEffectTexture) { console.warn("Fire effect texture failed to load."); return; }
     const baseFireMaterial = new THREE.MeshBasicMaterial({ map: fireEffectTexture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, name: 'fireEffectParticleMaterial' }); // Jawna nazwa
@@ -545,13 +560,14 @@ function createFireEffect(fireData) {
         p.mesh.position.copy(fireObject.position).add(
             new THREE.Vector3(
                 (Math.random() - 0.5) * spawnRadius,
-                Math.random() * 1.5,
+                Math.random() * fireObject.height,
                 (Math.random() - 0.5) * spawnRadius
             )
         );
         fireObject.particles.push(p);
         scene.add(p.mesh);
     }
+    currentFireParticleCount += particleCount;
     gameObjects.fires[fireData.id] = fireObject;
 }
 
@@ -559,7 +575,12 @@ function igniteTree(treeId) {
     const treeMesh = gameObjects.trees[treeId];
     if (!treeMesh || gameObjects.burningTrees[treeId]) return;
     const flameId = `tree-${treeId}`;
-    createFireEffect({ id: flameId, position: { x: treeMesh.position.x, y: treeMesh.position.y + 2, z: treeMesh.position.z }, initialRadius: 1.5 });
+    const box = new THREE.Box3().setFromObject(treeMesh);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const height = Math.max(3, size.y);
+    const baseRadius = Math.max(1.5, Math.min(4.5, Math.sqrt(size.x * size.z)));
+    createFireEffect({ id: flameId, position: { x: center.x, y: box.min.y, z: center.z }, initialRadius: baseRadius, height: height, particleCount: Math.floor(120 + height * 30) });
     // Split tree render parts for faster updates
     const trunkMeshes = []; const foliageMeshes = [];
     treeMesh.traverse(obj => {
@@ -573,7 +594,9 @@ function igniteTree(treeId) {
         mesh: treeMesh,
         stage: 'burning', // burning -> charred
         spreadCooldown: 0.4,
-        radius: 1.5,
+        radius: baseRadius,
+        fireHeight: height,
+        fullFlameTimer: 5.0,
         trunkMeshes,
         foliageMeshes
     };
@@ -1006,7 +1029,7 @@ function setupEventListeners() {
     document.addEventListener("keyup", (e) => { if (e.code === "Tab") scoreEl.style.display = "none"; });
     
     document.addEventListener('mousemove', (e) => { 
-        if (document.pointerLockElement === renderer.domElement) {
+        if (document.pointerLockElement) {
             mouseDelta.x += e.movementX;
             mouseDelta.y += e.movementY;
         } else {
@@ -1022,7 +1045,10 @@ function setupEventListeners() {
             // Robust pointer lock request: ensure element is in the same document
             try {
                 const targetEl = (renderer && renderer.domElement && document.body.contains(renderer.domElement)) ? renderer.domElement : document.body;
-                if (targetEl && targetEl.requestPointerLock) targetEl.requestPointerLock({ unadjustedMovement: true });
+                if (targetEl && targetEl.requestPointerLock) {
+                    if (targetEl.focus) targetEl.focus();
+                    targetEl.requestPointerLock({ unadjustedMovement: true });
+                }
             } catch (err) {
                 console.warn('Pointer lock request failed:', err);
             }
@@ -1039,7 +1065,7 @@ function setupEventListeners() {
     document.addEventListener('pointerlockchange', () => {
         const sniperOverlay = document.getElementById('sniper-overlay');
         const hudElements = [document.getElementById('hud'), document.getElementById('minimap-container'), document.getElementById('weapon-bar')];
-        if (document.pointerLockElement === renderer.domElement) {
+        if (document.pointerLockElement) {
             isSniperModeActive = true;
             sniperOverlay.style.display = 'block';
             hudElements.forEach(el => el.style.opacity = '0.2');
@@ -1410,14 +1436,16 @@ function animate() {
         const serverFire = clientGameState.fires[id];
         if (!serverFire) continue;
         const currentRadius = serverFire.radius;
-        for (let i = fire.particles.length - 1; i >= 0; i--) {
+        // Update particles in chunks to avoid large per-frame spikes
+        const step = Math.max(1, Math.floor((1 / FIRE_SETTINGS.PER_FRAME_FRACTION)));
+        for (let i = fire.particles.length - 1; i >= 0; i -= step) {
             const p = fire.particles[i];
             p.lifespan -= delta;
             if (p.lifespan <= 0) {
                 p.lifespan = p.initialLifespan;
                 const spawnRadius = currentRadius * 0.5;
                 p.mesh.position.copy(fire.position).add(
-                    new THREE.Vector3((Math.random() - 0.5) * spawnRadius, Math.random() * 1.5, (Math.random() - 0.5) * spawnRadius)
+                    new THREE.Vector3((Math.random() - 0.5) * spawnRadius, Math.random() * (fire.height || 1.5), (Math.random() - 0.5) * spawnRadius)
                 );
             } else {
                 p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
@@ -1437,13 +1465,13 @@ function animate() {
         const bt = gameObjects.burningTrees[treeId];
         const elapsed = (performance.now() - bt.startTime) / 1000;
         // Grow flame radius for visuals
-        bt.radius = Math.min(3.5, bt.radius + delta * 0.5);
+        bt.radius = Math.min(Math.max(3.5, bt.radius), bt.fireHeight * 0.35);
         const flame = gameObjects.fires[`tree-${treeId}`];
         if (flame) { // nudge particles outward as radius grows
-            const spawnRadius = bt.radius * 0.5;
+            const spawnRadius = bt.radius * 0.6;
             for (let i = 0; i < flame.particles.length; i += Math.floor(flame.particles.length / 6) || 1) {
                 const p = flame.particles[i];
-                p.mesh.position.copy(flame.position).add(new THREE.Vector3((Math.random()-0.5)*spawnRadius, Math.random()*1.5, (Math.random()-0.5)*spawnRadius));
+                p.mesh.position.copy(flame.position).add(new THREE.Vector3((Math.random()-0.5)*spawnRadius, Math.random()*bt.fireHeight, (Math.random()-0.5)*spawnRadius));
             }
         }
         // 5-stage visual burn progression (0-1)
@@ -1475,11 +1503,12 @@ function animate() {
                 }
             }
         }
-        // After burning time, remove foliage and darken trunk
+        // Keep tree fully engulfed for part of burn, then transition to charred
         if (elapsed >= BURN_DURATION && bt.stage === 'burning') {
             // Remove any fire effect for this tree
             const flame = gameObjects.fires[`tree-${treeId}`];
             if (flame) {
+                currentFireParticleCount -= flame.particles.length;
                 flame.particles.forEach(p => { scene.remove(p.mesh); });
                 delete gameObjects.fires[`tree-${treeId}`];
             }
@@ -1700,6 +1729,7 @@ socket.on('objectDestroyed', (payload) => {
     if (type === 'fire') {
         const fire = gameObjects.fires[id];
         if (fire) {
+            currentFireParticleCount -= fire.particles.length;
             fire.particles.forEach(p => {
                 scene.remove(p.mesh);
                 p.mesh.geometry.dispose();
@@ -1806,6 +1836,12 @@ socket.on('treeFallen', (data) => {
             aimables.splice(index, 1);
         }
     }
+});
+
+// HEAT tree ignition broadcast
+socket.on('treeIgnited', ({ treeId }) => {
+    if (!isGameStarted || !gameObjects.trees) return;
+    igniteTree(String(treeId));
 });
 
 // --- START APLIKACJI ---
