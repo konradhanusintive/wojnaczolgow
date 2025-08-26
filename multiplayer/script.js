@@ -558,6 +558,9 @@ class TankSelectionManager {
         this.renderTargets = [];
         this.isActive = false;
         this.animationFrameId = null;
+        // Współdzielony renderer WebGL (jeden kontekst dla wszystkich miniatur)
+        this.sharedRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        this.sharedRenderer.setPixelRatio(window.devicePixelRatio || 1);
     }
     init() {
         this.tankKeys.forEach(tankKey => {
@@ -570,9 +573,11 @@ class TankSelectionManager {
             // Ustawienia kamery dla miniatury
             const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
             camera.position.set(0, 3, 7); 
-
-            const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+            // Skonfiguruj rozmiar canvasa (atrybuty) dla ostrego obrazu
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+            canvas.height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+            const ctx2d = canvas.getContext('2d');
             
             scene.background = new THREE.Color(0x1a1a1a); 
 
@@ -592,7 +597,7 @@ class TankSelectionManager {
             camera.lookAt(0, tankMesh.position.y + 0.5, 0); // Spójrz lekko w dół, na środek czołgu
             
             const target = {
-                canvas, scene, camera, renderer, tankMesh,
+                canvas, ctx2d, scene, camera, tankMesh,
                 isDragging: false,
                 initialMouse: { x: 0, y: 0 },
                 initialRotation: { y: 0 },
@@ -648,15 +653,23 @@ class TankSelectionManager {
     animate = () => { // Zmieniono na funkcję strzałkową
         if (!this.isActive) return;
         this.renderTargets.forEach(target => {
-            if (!target.isDragging) target.tankMesh.rotation.y += 0.005;
-            target.renderer.render(target.scene, target.camera);
+            const { canvas, ctx2d, scene, camera, tankMesh } = target;
+            if (!target.isDragging) tankMesh.rotation.y += 0.005;
+            const width = canvas.width;
+            const height = canvas.height;
+            if (width === 0 || height === 0) return;
+            this.sharedRenderer.setSize(width, height, false);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            this.sharedRenderer.render(scene, camera);
+            ctx2d.clearRect(0, 0, width, height);
+            ctx2d.drawImage(this.sharedRenderer.domElement, 0, 0, width, height);
         });
         this.animationFrameId = requestAnimationFrame(this.animate);
     }
     destroy() {
         this.stopAnimation();
         this.renderTargets.forEach(target => {
-            target.renderer.dispose();
             target.scene.traverse(obj => {
                 if(obj.isMesh){
                     if (obj.geometry) obj.geometry.dispose();
@@ -681,6 +694,8 @@ class TankSelectionManager {
             target.canvas.removeEventListener('contextmenu', target.contextmenuHandler);
         });
         this.renderTargets = [];
+        // Zwolnij współdzielony renderer
+        this.sharedRenderer.dispose();
     }
 }
 
