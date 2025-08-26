@@ -1,13 +1,15 @@
 import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import { createSkydomeBackground } from './background.js';
+import { createEnvironment } from './environment.js';
 
 let scene, renderer, clock, camera;
 let localPlayerId = null;
 let clientGameState = {};
 let isGameStarted = false;
 let isSelectionScreenActive = false;
-let tankSelectionManager; // <-- Nowy menedżer dla ekranu wyboru
+let tankSelectionManager;
+let environmentMeshes = {}; // <-- Zmieniona nazwa, będzie przechowywać drzewa, skały itp.
 
 let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial, fireMaterial, scorchMarkMaterial;
@@ -56,7 +58,10 @@ const gameObjects = {
     smokeParticles: [], 
     tracks: {},
     craters: {},
-    fires: {}, // Nowy obiekt do przechowywania efektów ognia
+    fires: {},
+    fallingTrees: [], // <-- Przechowuje przewracające się drzewa
+    trees: {}, // <-- Mapa do przechowywania siatek drzew
+    rocks: {}  // <-- Mapa do przechowywania siatek skał
 };
 
 const socket = io();
@@ -144,14 +149,12 @@ function createTrackMarkTexture(type) {
     const color = (type === 'sand' || type === 'mud') 
         ? 'rgba(100, 80, 60, 0.25)'
         : 'rgba(80, 55, 35, 0.35)';
-
     const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
     const transparent = 'rgba(0,0,0,0)';
     gradient.addColorStop(0, transparent);
     gradient.addColorStop(0.15, color);
     gradient.addColorStop(0.85, color);
     gradient.addColorStop(1, transparent);
-    
     ctx.fillStyle = gradient;
     for (let i = 2; i < canvas.height; i += 8) {
         ctx.fillRect(0, i, canvas.width, 4);
@@ -392,8 +395,7 @@ function createFireEffect(fireData) {
     gameObjects.fires[fireData.id] = fireObject;
 }
 
-// --- NOWA KLASA DO ZARZĄDZANIA EKRANEM WYBORU ---
-
+// --- KLASA DO ZARZĄDZANIA EKRANEM WYBORU ---
 class TankSelectionManager {
     constructor(tankKeys) {
         this.tankKeys = tankKeys;
@@ -401,7 +403,6 @@ class TankSelectionManager {
         this.isActive = false;
         this.animationFrameId = null;
     }
-
     init() {
         this.tankKeys.forEach(tankKey => {
             const canvas = document.getElementById(`canvas-${tankKey}`);
@@ -409,90 +410,65 @@ class TankSelectionManager {
                 console.error(`Canvas for ${tankKey} not found or has no size.`);
                 return;
             }
-
             const scene = new THREE.Scene();
             const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
             const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
             renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-
             scene.add(new THREE.AmbientLight(0xffffff, 1.2));
             const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
             dirLight.position.set(5, 10, 7);
             scene.add(dirLight);
-
             const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa));
-            tankMesh.scale.set(0.6, 0.6, 0.6); // ZWIĘKSZONA SKALA
-            tankMesh.position.y = -2.5; // Dopasowana pozycja
+            tankMesh.scale.set(0.6, 0.6, 0.6);
+            tankMesh.position.y = -2.5;
             scene.add(tankMesh);
-
-            camera.position.z = 8; // Odsunięta kamera
-
+            camera.position.z = 8;
             const target = {
                 canvas, scene, camera, renderer, tankMesh,
                 isDragging: false,
                 initialMouse: { x: 0, y: 0 },
                 initialRotation: { y: 0 }
             };
-
             this.addEventListeners(target);
             this.renderTargets.push(target);
         });
-
         this.startAnimation();
     }
-
     addEventListeners(target) {
         const { canvas, camera } = target;
-
         canvas.addEventListener('mousedown', (e) => {
             target.isDragging = true;
             target.initialMouse.x = e.clientX;
             target.initialRotation.y = target.tankMesh.rotation.y;
         });
-
         window.addEventListener('mouseup', () => {
             target.isDragging = false;
         });
-        
         window.addEventListener('mousemove', (e) => {
             if (!target.isDragging) return;
             const deltaX = e.clientX - target.initialMouse.x;
             target.tankMesh.rotation.y = target.initialRotation.y + deltaX * 0.01;
         });
-
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const zoomSpeed = 0.5;
             camera.position.z += e.deltaY > 0 ? zoomSpeed : -zoomSpeed;
-            camera.position.z = Math.max(5, Math.min(12, camera.position.z)); // Zaktualizowany zakres zoomu
+            camera.position.z = Math.max(5, Math.min(12, camera.position.z));
         });
     }
-
-    startAnimation() {
-        this.isActive = true;
-        this.animate();
-    }
-
+    startAnimation() { this.isActive = true; this.animate(); }
     stopAnimation() {
         this.isActive = false;
-        if (this.animationFrameId) {
-            cancelAnimationFrame(this.animationFrameId);
-        }
+        if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
     }
-
     animate() {
         if (!this.isActive) return;
-
         this.renderTargets.forEach(target => {
-            if (!target.isDragging) {
-                target.tankMesh.rotation.y += 0.005;
-            }
+            if (!target.isDragging) target.tankMesh.rotation.y += 0.005;
             target.renderer.render(target.scene, target.camera);
         });
-
         this.animationFrameId = requestAnimationFrame(() => this.animate());
     }
-
     destroy() {
         this.stopAnimation();
         this.renderTargets.forEach(target => {
@@ -514,18 +490,16 @@ class TankSelectionManager {
     }
 }
 
-
 // --- LOGIKA UI ---
 function initializeUI() {
     document.getElementById("intro-logo").addEventListener("animationend", () => {
         document.getElementById("intro-screen").style.display = "none"; 
         document.getElementById("start-screen").style.display = "flex";
-        
         setTimeout(() => {
             isSelectionScreenActive = true;
             tankSelectionManager = new TankSelectionManager(Object.keys(TANKS_DATA));
             tankSelectionManager.init();
-        }, 100); // Małe opóźnienie, by DOM się ustabilizował
+        }, 100);
     });
     Object.keys(TANKS_DATA).forEach((tankKey) => {
         const tank = TANKS_DATA[tankKey];
@@ -535,10 +509,8 @@ function initializeUI() {
     document.querySelectorAll(".select-button").forEach((button) => {
         button.addEventListener("click", (e) => {
             if (button.disabled) return; 
-
             isSelectionScreenActive = false;
             if (tankSelectionManager) tankSelectionManager.destroy();
-
             const card = e.target.closest(".tank-card"); const tankType = card.id.split("-")[1];
             const mapSize = document.querySelector('input[name="map-size"]:checked').value;
             const amplitude = parseInt(document.getElementById('terrain-amplitude').value, 10);
@@ -556,11 +528,7 @@ function initializeUI() {
         const slot = document.createElement('div');
         slot.className = 'weapon-slot';
         slot.id = `weapon-slot-${key}`;
-        slot.innerHTML = `
-            <div class="weapon-key">${index + 1}</div>
-            <div class="weapon-icon">${weaponData.icon}</div>
-            <div class="weapon-ammo">0</div>
-        `;
+        slot.innerHTML = `<div class="weapon-key">${index + 1}</div><div class="weapon-icon">${weaponData.icon}</div><div class="weapon-ammo">0</div>`;
         slot.addEventListener('click', () => {
             socket.emit('playerAction', { type: 'switchWeapon', weaponId: key });
         });
@@ -682,25 +650,40 @@ function initGame(payload) {
     fireMaterial = new THREE.MeshBasicMaterial({ map: createFireTexture(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     scorchMarkMaterial = new THREE.MeshBasicMaterial({ map: createScorchMarkTexture(), transparent: true, depthWrite: false });
 
-    reconcileGameState(clientGameState); 
+    // Przekazujemy wysokość do environment.js, aby trawa mogła być poprawnie umieszczona
+    clientGameState.heightMap = heightMap;
+    environmentMeshes = createEnvironment(scene, terrainParams, clientGameState, aimables);
+    
+    // Zapisujemy referencje do siatek w głównym obiekcie gameObjects
+    gameObjects.trees = environmentMeshes.trees;
+    gameObjects.rocks = environmentMeshes.rocks;
+
+    reconcileGameState(clientGameState);
+    
+    // Zastosuj stan drzew z serwera (np. jeśli dołączono do trwającej gry)
+    if (clientGameState.trees) {
+        clientGameState.trees.forEach(treeData => {
+            if (treeData.state === 'fallen' && gameObjects.trees[treeData.id]) {
+                 gameObjects.trees[treeData.id].visible = false;
+            }
+        });
+    }
+    
     setupEventListeners(); 
     animate();
     setInterval(() => { if(clientGameState.players[localPlayerId] && !clientGameState.players[localPlayerId].isDestroyed && !clientGameState.players[localPlayerId].isSinking) { if (Math.random() > 0.6) showTankQuote(localPlayerId); } }, 15000 + Math.random() * 5000);
 }
+
 function handleFireInput() {
     if (!canFire || !localPlayerId || !clientGameState.players[localPlayerId] || clientGameState.players[localPlayerId].isDestroyed) return;
-
     const playerState = clientGameState.players[localPlayerId];
     if (playerState.isEmpDisabled) return;
-    
     let currentCooldown = 0.5;
     if (playerState.activePowerUp === 'machinegun') { currentCooldown = 0.08; } 
     else { const weaponData = WEAPONS_DATA[playerState.currentWeapon]; if(weaponData) currentCooldown = weaponData.cooldown; }
-    
     const localPlayerMesh = gameObjects.players[localPlayerId];
     const barrelWorldPos = new THREE.Vector3(); 
     localPlayerMesh.barrel.getWorldPosition(barrelWorldPos);
-    
     let direction;
     if (isSniperModeActive) {
         direction = new THREE.Vector3();
@@ -708,7 +691,6 @@ function handleFireInput() {
     } else {
         direction = new THREE.Vector3().subVectors(targetPoint, barrelWorldPos).normalize();
     }
-
     socket.emit('playerAction', { type: 'fire', direction: direction, startPosition: barrelWorldPos });
     canFire = false; fireCooldown = currentCooldown;
 }
@@ -813,7 +795,6 @@ function reconcileGameState(serverState) {
     const serverBuildingIds = Object.keys(serverState.buildings || {});
     for (const id of serverBuildingIds) { if (!gameObjects.buildings[id]) { createBuildingMesh(serverState.buildings[id]); } }
     
-    // --- POPRAWIONA PĘTLA TWORZENIA OBIEKTÓW ---
     const objectTypes = ['crate', 'ammoCrate', 'track'];
     for (const type of objectTypes) {
         const pluralType = type === 'track' ? 'tracks' : type + 's';
@@ -863,22 +844,18 @@ function createObjectMesh(payload) {
     if (newMesh) {
         newMesh.position.set(data.position.x, data.position.y + (type === 'track' ? 0.06 : 0), data.position.z);
         if(data.rotationY && type !== 'track') newMesh.rotation.y = data.rotationY;
-        
         container[data.id] = {
             mesh: newMesh,
             lifespan: data.lifespan,
             initialLifespan: data.lifespan,
         };
-        
         if (type === 'projectile' || type === 'machineGunBullet' || type === 'missile') {
             container[data.id].lastPosition = new THREE.Vector3().copy(newMesh.position);
         }
-        
         scene.add(newMesh);
     }
 }
 
-// --- PRZYWRÓCONA FUNKCJA MINIMAPY ---
 function drawMinimap() {
     if (!isGameStarted || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || !minimapCtx) { return; }
     const localPlayer = clientGameState.players[localPlayerId];
@@ -920,43 +897,34 @@ function drawMinimap() {
 
 function updateTerrainMesh(data) {
     if (!terrainMesh) return;
-
     const { position, radius, depth } = data;
     const { size, segments } = terrainParams;
     const radiusSq = radius * radius;
     const step = size / segments;
-
     const vertices = terrainMesh.geometry.attributes.position.array;
-
     const startX_grid = Math.max(0, Math.floor(((position.x - radius) + size / 2) / step));
     const endX_grid = Math.min(segments, Math.ceil(((position.x + radius) + size / 2) / step));
     const startZ_grid = Math.max(0, Math.floor(((position.z - radius) + size / 2) / step));
     const endZ_grid = Math.min(segments, Math.ceil(((position.z + radius) + size / 2) / step));
-
     for (let j = startZ_grid; j <= endZ_grid; j++) {
         for (let i = startX_grid; i <= endX_grid; i++) {
             const Px = i * step - size / 2;
             const Pz = j * step - size / 2;
             const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
-
             if (distSq < radiusSq) {
                 const dist = Math.sqrt(distSq);
                 const depression = depth * (0.5 * (Math.cos(dist / radius * Math.PI) + 1));
-                
                 if (heightMap[i] && heightMap[i][j] !== undefined) {
                     heightMap[i][j] -= depression;
                 }
-                
                 const vertexIndex = (j * (segments + 1) + i) * 3 + 2;
                 vertices[vertexIndex] -= depression;
             }
         }
     }
-
     terrainMesh.geometry.attributes.position.needsUpdate = true;
     terrainMesh.geometry.computeVertexNormals();
 }
-
 
 function animate() {
     if (isSelectionScreenActive) {
@@ -968,6 +936,10 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
     const localPlayerMesh = gameObjects.players[localPlayerId];
+    
+    if (environmentMeshes && environmentMeshes.grass) {
+        environmentMeshes.grass.material.uniforms.time.value = clock.getElapsedTime();
+    }
 
     minimapScanAngle = (minimapScanAngle - delta * 2.5) % (Math.PI * 2);
     if (fireCooldown > 0) { fireCooldown -= delta; } else { canFire = true; }
@@ -1018,31 +990,20 @@ function animate() {
             if (clientTank.laserSight && serverPlayer.laserData) {
                 const laser = clientTank.laserSight;
                 laser.visible = serverPlayer.laserData.enabled && !serverPlayer.isDestroyed && !serverPlayer.isSinking;
-                
                 if (laser.visible) {
                     const positions = laser.geometry.attributes.position.array;
                     if (isSniperModeActive && id === localPlayerId) {
                         raycaster.setFromCamera({ x: 0, y: 0 }, camera);
                         const intersects = raycaster.intersectObjects(aimables, true);
                         const endPoint = intersects.length > 0 ? intersects[0].point : raycaster.ray.at(10000, sniperLaserEndPoint);
-                        
                         const startPoint = new THREE.Vector3();
                         localPlayerMesh.barrelTip.getWorldPosition(startPoint);
-                        
-                        positions[0] = startPoint.x;
-                        positions[1] = startPoint.y;
-                        positions[2] = startPoint.z;
-                        positions[3] = endPoint.x;
-                        positions[4] = endPoint.y;
-                        positions[5] = endPoint.z;
+                        positions[0] = startPoint.x; positions[1] = startPoint.y; positions[2] = startPoint.z;
+                        positions[3] = endPoint.x; positions[4] = endPoint.y; positions[5] = endPoint.z;
                     } else {
                         const data = serverPlayer.laserData;
-                        positions[0] = data.start.x;
-                        positions[1] = data.start.y;
-                        positions[2] = data.start.z;
-                        positions[3] = data.end.x;
-                        positions[4] = data.end.y;
-                        positions[5] = data.end.z;
+                        positions[0] = data.start.x; positions[1] = data.start.y; positions[2] = data.start.z;
+                        positions[3] = data.end.x; positions[4] = data.end.y; positions[5] = data.end.z;
                     }
                     laser.geometry.attributes.position.needsUpdate = true;
                 }
@@ -1090,9 +1051,7 @@ function animate() {
         const fire = gameObjects.fires[id];
         const serverFire = clientGameState.fires[id];
         if (!serverFire) continue;
-
         const currentRadius = serverFire.radius;
-
         for (let i = fire.particles.length - 1; i >= 0; i--) {
             const p = fire.particles[i];
             p.lifespan -= delta;
@@ -1100,11 +1059,7 @@ function animate() {
                 p.lifespan = p.initialLifespan;
                 const spawnRadius = currentRadius * 0.5;
                 p.mesh.position.copy(fire.position).add(
-                    new THREE.Vector3(
-                        (Math.random() - 0.5) * spawnRadius,
-                        Math.random() * 1.5,
-                        (Math.random() - 0.5) * spawnRadius
-                    )
+                    new THREE.Vector3((Math.random() - 0.5) * spawnRadius, Math.random() * 1.5, (Math.random() - 0.5) * spawnRadius)
                 );
             } else {
                 p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
@@ -1175,6 +1130,17 @@ function animate() {
             bubble.style.left = `${x}px`; bubble.style.top = `${y}px`;
         }
     }
+
+    for (let i = gameObjects.fallingTrees.length - 1; i >= 0; i--) {
+        const tree = gameObjects.fallingTrees[i];
+        if (tree.rotationProgress < Math.PI / 2) {
+            const rotationAmount = tree.fallSpeed * delta;
+            tree.mesh.quaternion.multiply(
+                new THREE.Quaternion().setFromAxisAngle(tree.fallAxis, rotationAmount)
+            );
+            tree.rotationProgress += rotationAmount;
+        }
+    }
     
     if (localPlayerMesh) {
         const localPlayerState = clientGameState.players[localPlayerId];
@@ -1192,7 +1158,6 @@ function animate() {
                 const intersects = raycaster.intersectObjects(aimables, true);
                 if (intersects.length > 0) { targetPoint.copy(intersects[0].point); } 
                 else { const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -localPlayerMesh.position.y); raycaster.ray.intersectPlane(plane, targetPoint); }
-                
                 const localTargetInTurret = turret.worldToLocal(targetPoint.clone());
                 const targetTurretAngle = Math.atan2(localTargetInTurret.x, localTargetInTurret.z);
                 let diff = targetTurretAngle - turret.rotation.y;
@@ -1201,7 +1166,6 @@ function animate() {
                 const targetMantletAngle = Math.atan2(localTargetInTurret.y, Math.sqrt(localTargetInTurret.x**2 + localTargetInTurret.z**2));
                 mantlet.rotation.x = THREE.MathUtils.lerp(mantlet.rotation.x, Math.max(-0.5, Math.min(0.2, targetMantletAngle)), 0.15);
             }
-            
             localPlayerState.turretRotation.y = turret.rotation.y; 
             localPlayerState.mantletRotation.x = mantlet.rotation.x;
             socket.emit('playerAimUpdate', { turretY: turret.rotation.y, mantletX: mantlet.rotation.x });
@@ -1215,21 +1179,15 @@ function animate() {
         if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
             const tankData = TANKS_DATA[localPlayerState.tankType];
             const cameraOffsetY = tankData.sniperCamYOffset || 1.5;
-
             localPlayerMesh.barrelTip.getWorldPosition(sniperCameraPosition);
-            
             const sniperViewPosition = sniperCameraPosition.clone();
             sniperViewPosition.y += cameraOffsetY;
-
             const mantletPosition = new THREE.Vector3();
             localPlayerMesh.mantlet.getWorldPosition(mantletPosition);
             const forwardVector = new THREE.Vector3().subVectors(sniperCameraPosition, mantletPosition).normalize();
-            
             forwardVector.y += 0.02; 
             forwardVector.normalize();
-
             const lookAtTargetPoint = sniperViewPosition.clone().add(forwardVector.multiplyScalar(100));
-            
             camera.position.lerp(sniperViewPosition, 0.7);
             camera.lookAt(lookAtTargetPoint);
         } else if (localPlayerState && (localPlayerState.isSinking || localPlayerState.isDestroyed)) {
@@ -1260,13 +1218,11 @@ socket.on('serverStatus', (data) => {
         const scaleSlider = document.getElementById('terrain-scale'); const scaleValue = document.getElementById('scale-value');
         scaleSlider.value = data.settings.scale; scaleValue.textContent = data.settings.scale;
     } else { console.log("Serwer oczekuje na konfigurację."); }
-    
     if (data.devMode) {
         console.log("Tryb deweloperski AKTYWNY. Odblokowywanie zawartości premium.");
         const abramsCard = document.getElementById('select-abrams');
         const abramsButton = abramsCard.querySelector('button');
         const premiumLabel = abramsCard.querySelector('.premium-label');
-
         abramsCard.classList.remove('locked');
         abramsButton.disabled = false;
         abramsButton.textContent = 'Wybierz i Walcz';
@@ -1282,6 +1238,7 @@ socket.on("gameStateUpdate", (serverState) => {
     clientGameState = serverState;
 });
 socket.on('objectCreated', (payload) => {
+    if (!isGameStarted) return; 
     if (payload.type === 'smokeCloud') {
         createSmokeCloud(new THREE.Vector3(payload.data.position.x, payload.data.position.y, payload.data.position.z), payload.data.radius, payload.data.lifespan);
     } else {
@@ -1303,7 +1260,6 @@ socket.on('objectDestroyed', (payload) => {
                 p.mesh.material.dispose();
             });
             delete gameObjects.fires[id];
-
             const scorchMarkSize = payload.radius * 2.5;
             const scorchMark = new THREE.Mesh(
                 new THREE.PlaneGeometry(scorchMarkSize, scorchMarkSize),
@@ -1315,10 +1271,8 @@ socket.on('objectDestroyed', (payload) => {
         }
         return;
     }
-
     const objectList = gameObjects[containerName];
     const object = objectList ? objectList[id] : null;
-
     if (object) {
         const mesh = (type === 'player') ? object : object.mesh;
         if(type === 'player' && payload.hit) { 
@@ -1387,6 +1341,28 @@ socket.on('terrainDeformed', (data) => {
     updateTerrainMesh(data);
 });
 
+socket.on('treeFallen', (data) => {
+    if (!isGameStarted || !gameObjects.trees) return;
+    const { treeId, fallAxis, fallSpeed } = data;
+    const treeMesh = gameObjects.trees[treeId];
+    
+    if (treeMesh && !treeMesh.isFalling) {
+        treeMesh.isFalling = true; // Flaga, by nie przewracać tego samego drzewa wielokrotnie
+        gameObjects.fallingTrees.push({
+            mesh: treeMesh,
+            fallAxis: new THREE.Vector3(fallAxis.x, fallAxis.y, fallAxis.z).normalize(),
+            fallSpeed: fallSpeed,
+            rotationProgress: 0
+        });
+        
+        // Usuwamy drzewo z listy celów, gdy zaczyna upadać
+        const index = aimables.indexOf(treeMesh);
+        if (index > -1) {
+            aimables.splice(index, 1);
+        }
+    }
+});
+
 // --- START APLIKACJI ---
 initializeUI();
-animate(); // Uruchom główną pętlę animacji od razu
+animate();

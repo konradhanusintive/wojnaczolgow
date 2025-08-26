@@ -12,7 +12,7 @@ export function createSkydomeBackground(scene) {
 
     const textureLoader = new THREE.TextureLoader();
     const skyTexture = textureLoader.load(
-        'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/2294472375_24a3b8ef46_o.jpg', // Zmieniony, stabilny link do tekstury JPG
+        './sunflowers_puresky_4k.jpg', // Zmieniony, stabilny link do tekstury JPG
         () => {
             console.log("Tekstura Skydome załadowana pomyślnie.");
         },

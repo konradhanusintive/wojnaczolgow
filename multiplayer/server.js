@@ -9,24 +9,23 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // --- Konfiguracja i stałe gry ---
-const IS_DEV_MODE = true; // <-- FEATURE FLAG DLA TRYBU DEWELOPERSKIEGO
+const IS_DEV_MODE = true;
 const PORT = process.env.PORT || 3000;
-const POWERUP_TYPES = ["turbo", "machinegun", "mines"]; 
-const PLAYER_COLLISION_RADIUS = 7;
-const MAX_TRACKS = 500; // Maksymalna liczba śladów na mapie jednocześnie
-const TRACK_DISTANCE_THRESHOLD = 3.0; // Jak daleko czołg musi przejechać, by zostawić ślad
+const POWERUP_TYPES = ["turbo", "machinegun", "mines"];
+const PLAYER_COLLISION_RADIUS = 4.0; // Zmniejszony dla precyzyjniejszych kolizji
+const MAX_TRACKS = 500;
+const TRACK_DISTANCE_THRESHOLD = 3.0;
 
-// Domyślne/startowe wartości, które mogą być zmienione przez pierwszego gracza
-let MAP_SIZE = 500; 
+let MAP_SIZE = 500;
 let TERRAIN_AMPLITUDE = 20;
 let TERRAIN_SCALE = 120;
-let isGameConfigured = false; 
+let isGameConfigured = false;
 
 const MAP_SIZES = { S: 300, M: 500, L: 700, XL: 900, XXL: 1200 };
 
 const TERRAIN_SEGMENTS = 100;
 let heightMap = [];
-const SANDY_AREA_RADIUS = 150; 
+const SANDY_AREA_RADIUS = 150;
 const HILL_TRANSITION_WIDTH = 50;
 const MUD_BORDER_WIDTH = 30;
 
@@ -36,7 +35,7 @@ const SPAWN_POINTS = [
     { x: 0.28, z: 0.28 }, { x: -0.28, z: -0.28 },
     { x: 0.28, z: -0.28 },{ x: -0.28, z: 0.28 }
 ];
-const SPAWN_CLEARANCE_RADIUS = 35; 
+const SPAWN_CLEARANCE_RADIUS = 35;
 
 const CITY_GRID_SIZE = 20;
 const CITY_CELL_SIZE = 30;
@@ -45,7 +44,10 @@ const BUILDING_MIN_FLOORS = 2;
 const BUILDING_MAX_FLOORS = 8;
 const BRICK_SIZE = { x: 2.0, y: 1.0, z: 4.0 };
 const PLAYER_HEIGHT = 4.0;
-const TANK_LENGTH = 10.0; 
+const TANK_LENGTH = 10.0;
+const PINE_TREE_COUNT = 800;
+const TREE_COLLISION_RADIUS = 1.5;
+const LARGE_ROCK_COUNT = 30;
 
 const TANKS_DATA = {
   pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0 },
@@ -73,7 +75,9 @@ const gameState = {
   missiles: {},
   machineGunBullets: {},
   tracks: {},
-  fires: {}, // Nowy stan do zarządzania ogniem
+  fires: {},
+  trees: [],
+  rocks: [] // <-- NOWY STAN: Przechowuje informacje o skałach
 };
 
 let nextObjectId = 0;
@@ -125,20 +129,16 @@ function generateHeightMap() {
         for (let j = 0; j <= TERRAIN_SEGMENTS; j++) {
             const x = (i / TERRAIN_SEGMENTS - 0.5) * MAP_SIZE;
             const z = (j / TERRAIN_SEGMENTS - 0.5) * MAP_SIZE;
-            
             const dist_x = Math.abs(x);
             const dist_z = Math.abs(z);
             const max_dist = Math.max(dist_x, dist_z);
-
             const nx = i / TERRAIN_SEGMENTS;
             const ny = j / TERRAIN_SEGMENTS;
-
             let height = 0;
             const hill_noise = PerlinNoise.noise(nx * TERRAIN_SCALE / 100, ny * TERRAIN_SCALE / 100)
                              + 0.5 * PerlinNoise.noise(nx * TERRAIN_SCALE / 50, ny * TERRAIN_SCALE / 50)
                              + 0.25 * PerlinNoise.noise(nx * TERRAIN_SCALE / 25, ny * TERRAIN_SCALE / 25);
             const normalized_hill_height = hill_noise / (1 + 0.5 + 0.25) * TERRAIN_AMPLITUDE;
-
             if (max_dist < SANDY_AREA_RADIUS) {
                 height = 0;
             } else if (max_dist < SANDY_AREA_RADIUS + HILL_TRANSITION_WIDTH) {
@@ -168,6 +168,16 @@ function getHeightAt(x, z) {
     return h_x1 * (1 - tz) + h_x2 * tz;
 }
 
+function getSlopeAt(x, z) {
+    const delta = 0.1;
+    const h = getHeightAt(x, z);
+    const hx = getHeightAt(x + delta, z);
+    const hz = getHeightAt(x, z + delta);
+    const slopeX = (hx - h) / delta;
+    const slopeZ = (hz - h) / delta;
+    return Math.sqrt(slopeX * slopeX + slopeZ * slopeZ);
+}
+
 function getTerrainTypeAt(x, z) {
     const max_dist = Math.max(Math.abs(x), Math.abs(z));
     if (max_dist > MAP_SIZE / 2 - MUD_BORDER_WIDTH) return 'mud';
@@ -179,21 +189,18 @@ function applyDeformation(data) {
     const { position, radius, depth } = data;
     const radiusSq = radius * radius;
     const step = MAP_SIZE / TERRAIN_SEGMENTS;
-
     const startX = Math.max(0, Math.floor(((position.x - radius) + MAP_SIZE / 2) / step));
     const endX = Math.min(TERRAIN_SEGMENTS, Math.ceil(((position.x + radius) + MAP_SIZE / 2) / step));
     const startZ = Math.max(0, Math.floor(((position.z - radius) + MAP_SIZE / 2) / step));
     const endZ = Math.min(TERRAIN_SEGMENTS, Math.ceil(((position.z + radius) + MAP_SIZE / 2) / step));
-
     for (let i = startX; i <= endX; i++) {
         for (let j = startZ; j <= endZ; j++) {
             const Px = i * step - MAP_SIZE / 2;
             const Pz = j * step - MAP_SIZE / 2;
             const distSq = (Px - position.x) ** 2 + (Pz - position.z) ** 2;
-
             if (distSq < radiusSq) {
                 const dist = Math.sqrt(distSq);
-                const depression = depth * (0.5 * (Math.cos(dist / radius * Math.PI) + 1)); // Płynne wgłębienie (cosine falloff)
+                const depression = depth * (0.5 * (Math.cos(dist / radius * Math.PI) + 1));
                 if (heightMap[i] && heightMap[i][j] !== undefined) {
                     heightMap[i][j] -= depression;
                 }
@@ -204,18 +211,14 @@ function applyDeformation(data) {
 
 function handleDamage(player, amount, attackerId, impulseDirection = {x:0, y:0, z:0}, impulseMagnitude = 0, impactPoint = player.position) {
     if (!player || player.isDestroyed || player.isSinking) return;
-    
     player.health -= amount;
-
     player.impulse.x += impulseDirection.x * impulseMagnitude;
     player.impulse.z += impulseDirection.z * impulseMagnitude;
-    
     io.emit('playerHit', { 
         victimId: player.id, 
         impactPoint: impactPoint, 
         impulse: { x: impulseDirection.x, y: impulseDirection.y, z: impulseDirection.z }
     });
-
     if (player.health <= 0) {
         player.isDestroyed = true; player.respawnTimer = 3.0; 
         const owner = gameState.players[attackerId];
@@ -225,6 +228,7 @@ function handleDamage(player, amount, attackerId, impulseDirection = {x:0, y:0, 
         io.emit('objectDestroyed', { type: 'player', id: player.id, attackerId: attackerId, hit: true });
     }
 }
+
 function applyEMP(player, duration) {
     if (!player || player.isDestroyed || player.isSinking) return;
     player.isEmpDisabled = true;
@@ -234,23 +238,18 @@ function applyEMP(player, duration) {
 function fireWeapon(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.isReloading || player.isEmpDisabled) return;
-    
     if (player.activePowerUp === 'machinegun') {
         fireMachineGun(playerId, action);
         return;
     }
-    
     const weaponId = player.currentWeapon;
     const weaponData = WEAPONS_DATA[weaponId];
     if (!weaponData || player.ammo[weaponId] <= 0) return;
-    
     player.ammo[weaponId]--;
     const { direction, startPosition } = action;
-
     const recoilMagnitude = weaponData.recoilImpulse || 0;
     player.impulse.x -= direction.x * recoilMagnitude;
     player.impulse.z -= direction.z * recoilMagnitude;
-
     if (weaponData.type === 'projectile') {
         const projectileId = `proj_${nextObjectId++}`;
         const projectile = {
@@ -273,15 +272,14 @@ function fireWeapon(playerId, action) {
         io.emit('objectCreated', { type: 'missile', data: missile });
     }
 }
+
 function fireMachineGun(playerId, action) {
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.powerUpTimer <= 0) return;
     const { direction, startPosition } = action;
-
     const recoilMagnitude = 1.5;
     player.impulse.x -= direction.x * recoilMagnitude;
     player.impulse.z -= direction.z * recoilMagnitude;
-
     const bulletId = `bullet_${nextObjectId++}`;
     const bullet = {
         id: bulletId, ownerId: playerId, damage: 3, position: startPosition,
@@ -290,6 +288,7 @@ function fireMachineGun(playerId, action) {
     gameState.machineGunBullets[bulletId] = bullet;
     io.emit('objectCreated', { type: 'machineGunBullet', data: bullet });
 }
+
 function dropMine(playerId){
     const player = gameState.players[playerId];
     if (!player || player.isDestroyed || player.isSinking || player.activePowerUp !== 'mines' || player.powerUpAmmo <= 0) return;
@@ -307,6 +306,7 @@ function dropMine(playerId){
     io.emit('objectCreated', { type: 'mine', data: mine });
     if(player.powerUpAmmo <= 0) deactivatePowerUp(playerId);
 }
+
 function handlePlayerAction(socket, action) {
     const player = gameState.players[socket.id];
     if (!player || player.isDestroyed || player.isSinking) return;
@@ -326,6 +326,7 @@ function handlePlayerAction(socket, action) {
             break;
     }
 }
+
 function activatePowerUp(playerId, type) {
     const player = gameState.players[playerId];
     if (!player) return;
@@ -336,9 +337,20 @@ function activatePowerUp(playerId, type) {
         case "mines": player.powerUpAmmo = 5; break;
     }
 }
+
 function deactivatePowerUp(playerId) {
     const player = gameState.players[playerId];
     if (player) { player.activePowerUp = null; player.powerUpTimer = 0; player.powerUpAmmo = 0; }
+}
+
+function checkEnvironmentCollision(player, newPosX, newPosZ) {
+    for (const rock of gameState.rocks) {
+        const distSq = (newPosX - rock.position.x)**2 + (newPosZ - rock.position.z)**2;
+        if (distSq < (PLAYER_COLLISION_RADIUS + rock.radius)**2) {
+            return true; // Kolizja
+        }
+    }
+    return false; // Brak kolizji
 }
 
 function gameLoop() {
@@ -380,7 +392,6 @@ function gameLoop() {
         const stats = TANKS_DATA[player.tankType].stats;
         let moveSpeed = stats.speed * delta * (player.activePowerUp === 'turbo' ? 2.5 : 1);
         const rotateSpeed = stats.turretRot * delta;
-
         const moveVector = { x: 0, z: 0 };
 
         if (!player.isEmpDisabled) {
@@ -389,8 +400,8 @@ function gameLoop() {
                 moveVector.z += Math.cos(player.rotation.y) * moveSpeed;
             }
             if (player.keys.KeyS || player.keys.ArrowDown) {
-                moveVector.x -= Math.sin(player.rotation.y) * moveSpeed;
-                moveVector.z -= Math.cos(player.rotation.y) * moveSpeed;
+                moveVector.x -= Math.sin(player.rotation.y) * moveSpeed * 0.7;
+                moveVector.z -= Math.cos(player.rotation.y) * moveSpeed * 0.7;
             }
             if (player.keys.KeyA || player.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
             if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
@@ -404,22 +415,23 @@ function gameLoop() {
         if (Math.abs(player.impulse.z) < 0.1) player.impulse.z = 0;
 
         if (moveVector.x !== 0 || moveVector.z !== 0) {
-            if (player.keys.KeyW || player.keys.ArrowUp) {
-                const lookAheadDist = 2.0;
-                const lookAheadX = player.position.x + Math.sin(player.rotation.y) * lookAheadDist;
-                const lookAheadZ = player.position.z + Math.cos(player.rotation.y) * lookAheadDist;
-                const currentHeight = player.position.y - TANKS_DATA[player.tankType].startY;
-                const futureHeight = getHeightAt(lookAheadX, lookAheadZ);
-                const slope = (futureHeight - currentHeight) / lookAheadDist;
-                const maxSlope = 0.8;
-                if (slope > maxSlope) { moveVector.x = 0; moveVector.z = 0; }
-            }
-            const newPosX = player.position.x + moveVector.x; 
-            const newPosZ = player.position.z + moveVector.z;
+            const lookAheadDist = 2.0;
+            const lookAheadX = player.position.x + Math.sin(player.rotation.y) * lookAheadDist;
+            const lookAheadZ = player.position.z + Math.cos(player.rotation.y) * lookAheadDist;
+            const currentHeight = getHeightAt(player.position.x, player.position.z);
+            const futureHeight = getHeightAt(lookAheadX, lookAheadZ);
+            const slope = (futureHeight - currentHeight) / lookAheadDist;
+            const maxSlope = 0.8;
             
-            const tempPos = { ...player.position };
-            player.position.x = newPosX; if (checkPlayerBuildingCollision(player)) { player.position.x = tempPos.x; }
-            player.position.z = newPosZ; if (checkPlayerBuildingCollision(player)) { player.position.z = tempPos.z; }
+            if (slope < maxSlope || moveVector.z < 0) { // Pozwól na zjeżdżanie ze stromych wzniesień
+                 const newPosX = player.position.x + moveVector.x; 
+                 const newPosZ = player.position.z + moveVector.z;
+                
+                 if (!checkEnvironmentCollision(player, newPosX, newPosZ)) {
+                     player.position.x = newPosX;
+                     player.position.z = newPosZ;
+                 }
+            }
         }
         
         const tankData = TANKS_DATA[player.tankType];
@@ -453,10 +465,8 @@ function gameLoop() {
             const trackWidth = tankData.hullWidth / 2 - 0.5;
             const cosR = Math.cos(player.rotation.y);
             const sinR = Math.sin(player.rotation.y);
-            
             const rightTrackPos = { x: player.position.x + cosR * trackWidth, z: player.position.z - sinR * trackWidth };
             const leftTrackPos = { x: player.position.x - cosR * trackWidth, z: player.position.z + sinR * trackWidth };
-
             [leftTrackPos, rightTrackPos].forEach(pos => {
                 const trackId = `track_${nextObjectId++}`;
                 const track = {
@@ -472,11 +482,31 @@ function gameLoop() {
             player.lastTrackPos = { ...player.position };
         }
 
+        for (const tree of gameState.trees) {
+            if (tree.state === 'standing') {
+                const distSq = (player.position.x - tree.position.x)**2 + (player.position.z - tree.position.z)**2;
+                if (distSq < (PLAYER_COLLISION_RADIUS + TREE_COLLISION_RADIUS)**2) {
+                    tree.state = 'fallen';
+                    const fallDirectionX = tree.position.x - player.position.x;
+                    const fallDirectionZ = tree.position.z - player.position.z;
+                    const len = Math.sqrt(fallDirectionX**2 + fallDirectionZ**2) || 1;
+                    const normalizedFallX = fallDirectionX / len;
+                    const normalizedFallZ = fallDirectionZ / len;
+                    const fallAxis = { x: -normalizedFallZ, y: 0, z: normalizedFallX };
+                    io.emit('treeFallen', { 
+                        treeId: tree.id, 
+                        fallAxis: fallAxis,
+                        fallSpeed: 1.0 + Math.random() * 0.5
+                    });
+                }
+            }
+        }
+
         for (const otherId in gameState.players) {
             if (id === otherId) continue; const otherPlayer = gameState.players[otherId]; if (otherPlayer.isDestroyed || otherPlayer.isSinking) continue;
             const dist = Math.sqrt((player.position.x - otherPlayer.position.x) ** 2 + (player.position.z - otherPlayer.position.z) ** 2);
-            if (dist < PLAYER_COLLISION_RADIUS) {
-                const overlap = (PLAYER_COLLISION_RADIUS - dist) / 2; const angle = Math.atan2(player.position.z - otherPlayer.position.z, player.position.x - otherPlayer.position.x);
+            if (dist < PLAYER_COLLISION_RADIUS * 2) {
+                const overlap = (PLAYER_COLLISION_RADIUS * 2 - dist) / 2; const angle = Math.atan2(player.position.z - otherPlayer.position.z, player.position.x - otherPlayer.position.x);
                 player.position.x += Math.cos(angle) * overlap; player.position.z += Math.sin(angle) * overlap;
             }
         }
@@ -489,6 +519,7 @@ function gameLoop() {
                 io.emit('objectDestroyed', { type: 'crate', id: crateId }); crateSpawnTimer = 1.0;
             }
         }
+
         for (const crateId in gameState.ammoCrates) {
             const crate = gameState.ammoCrates[crateId];
             const dist = Math.sqrt((player.position.x - crate.position.x) ** 2 + (player.position.z - crate.position.z) ** 2);
@@ -533,9 +564,7 @@ function gameLoop() {
                     io.emit('terrainDeformed', deformData);
                 }
             }
-            
             if (p.lifespan <= 0) destroyed = true;
-
             if (destroyed) {
                 const impactPoint = { ...p.position };
                 if (p.blastRadius > 0) {
@@ -638,31 +667,26 @@ function gameLoop() {
     for (const fireId in gameState.fires) {
         const fire = gameState.fires[fireId];
         fire.lifespan -= delta;
-
         for (const playerId in fire.damageCooldown) {
             if (fire.damageCooldown[playerId] > 0) {
                 fire.damageCooldown[playerId] -= delta;
             }
         }
-        
         if (fire.lifespan <= 0) {
             io.emit('objectDestroyed', { type: 'fire', id: fireId, position: fire.position, radius: fire.maxRadius });
             delete gameState.fires[fireId];
             continue;
         }
-
-        const lifePercent = 1 - (fire.lifespan / 20.0); // 20.0 to początkowy czas życia
+        const lifePercent = 1 - (fire.lifespan / 20.0);
         fire.radius = lerp(fire.initialRadius, fire.maxRadius, lifePercent);
-
         for (const playerId in gameState.players) {
             const player = gameState.players[playerId];
             if (player.isDestroyed || player.isSinking) continue;
-
             const dist = Math.sqrt((player.position.x - fire.position.x)**2 + (player.position.z - fire.position.z)**2);
             if (dist < fire.radius) {
                 if (!fire.damageCooldown[playerId] || fire.damageCooldown[playerId] <= 0) {
                     handleDamage(player, fire.damage, fire.ownerId);
-                    fire.damageCooldown[playerId] = 1.0; // 1 sekunda nietykalności
+                    fire.damageCooldown[playerId] = 1.0;
                 }
             }
         }
@@ -728,21 +752,6 @@ function gameLoop() {
     io.emit("gameStateUpdate", gameState);
 }
 
-function checkPlayerBuildingCollision(player) {
-    const playerRadius = 3.5;
-    for (const buildingId in gameState.buildings) {
-        const building = gameState.buildings[buildingId]; const { position: bPos, dimensions: bDim } = building;
-        if (player.position.x + playerRadius < bPos.x - bDim.x / 2 || player.position.x - playerRadius > bPos.x + bDim.x / 2 || player.position.z + playerRadius < bPos.z - bDim.z / 2 || player.position.z - playerRadius > bPos.z + bDim.z / 2) continue;
-        let minBuildingHeight = Infinity;
-        const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }];
-        corners.forEach(c => { const h = getHeightAt(c.x, c.z); if(h < minBuildingHeight) minBuildingHeight = h; });
-        const playerAABB = { minY: player.position.y - TANKS_DATA[player.tankType].startY, maxY: player.position.y - TANKS_DATA[player.tankType].startY + PLAYER_HEIGHT };
-        const buildingAABB = { minY: minBuildingHeight, maxY: minBuildingHeight + bDim.y };
-        if (playerAABB.maxY < buildingAABB.minY || playerAABB.minY > buildingAABB.maxY) continue;
-        return true;
-    }
-    return false;
-}
 function checkProjectileBuildingCollision(projectile, buildings) {
     for (const building of buildings) {
         const { position: bPos, dimensions: bDim } = building;
@@ -751,7 +760,6 @@ function checkProjectileBuildingCollision(projectile, buildings) {
         const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }];
         corners.forEach(c => { const h = getHeightAt(c.x, c.z); if(h < minBuildingHeight) minBuildingHeight = h; });
         if (projectile.position.y < minBuildingHeight || projectile.position.y > minBuildingHeight + bDim.y) continue;
-
         if (projectile.weaponId === 'he' || projectile.weaponId === 'heat' || projectile.weaponId === 'guided') {
             const impactPoint = { ...projectile.position }; const destroyedBrickIndices = []; const destructionRadius = 2.5;
             const buildingGroundHeight = getHeightAt(building.position.x, building.position.z);
@@ -770,7 +778,7 @@ function checkProjectileBuildingCollision(projectile, buildings) {
     return false;
 }
 
-function createProceduralCity() {
+function createInitialEnvironment() {
     gameState.buildings = {};
     const cityOrigin = { x: - (CITY_GRID_SIZE * CITY_CELL_SIZE) / 2, z: - (CITY_GRID_SIZE * CITY_CELL_SIZE) / 2 };
     for (let i = 0; i < CITY_GRID_SIZE; i++) {
@@ -804,24 +812,81 @@ function createProceduralCity() {
             }
         }
     }
-    console.log(`Świat gry został stworzony: ${Object.keys(gameState.buildings).length} budynków.`);
+    
+    gameState.trees = [];
+    let treesPlaced = 0;
+    for (let i = 0; i < PINE_TREE_COUNT; i++) {
+        let x, z, isValidPosition = false, attempts = 0;
+        while (!isValidPosition && attempts < 20) {
+            x = (Math.random() - 0.5) * MAP_SIZE;
+            z = (Math.random() - 0.5) * MAP_SIZE;
+            const distFromCenter = Math.sqrt(x * x + z * z);
+            const slope = getSlopeAt(x, z);
+            let isInsideBuilding = Object.values(gameState.buildings).some(b => 
+                b && b.position && b.dimensions &&
+                Math.abs(x - b.position.x) < b.dimensions.x / 2 + 5 && 
+                Math.abs(z - b.position.z) < b.dimensions.z / 2 + 5
+            );
+            if (distFromCenter > SANDY_AREA_RADIUS + 50 && slope < 0.9 && !isInsideBuilding) {
+                isValidPosition = true;
+            }
+            attempts++;
+        }
+        if (isValidPosition) {
+            const y = getHeightAt(x, z);
+            const scale = 0.9 + Math.random() * 0.8;
+            gameState.trees.push({
+                id: treesPlaced,
+                position: { x, y, z },
+                scale: scale,
+                rotationY: Math.random() * Math.PI * 2,
+                state: 'standing'
+            });
+            treesPlaced++;
+        }
+    }
+    
+    gameState.rocks = [];
+    for (let i = 0; i < LARGE_ROCK_COUNT; i++) {
+        let x, z, isValidPosition = false, attempts = 0;
+        let rockRadius = 5 + Math.random() * 10;
+        while (!isValidPosition && attempts < 20) {
+            x = (Math.random() - 0.5) * MAP_SIZE;
+            z = (Math.random() - 0.5) * MAP_SIZE;
+            const distFromCenter = Math.sqrt(x * x + z * z);
+            const slope = getSlopeAt(x, z);
+            if (distFromCenter > SANDY_AREA_RADIUS + 80 && slope > 0.3 && slope < 1.5) {
+                isValidPosition = true;
+            }
+            attempts++;
+        }
+        if (isValidPosition) {
+            const y = getHeightAt(x, z);
+            gameState.rocks.push({
+                id: `rock_${i}`,
+                position: {x: x, y: y + rockRadius * 0.2, z: z},
+                radius: rockRadius,
+                rotation: {x: Math.random() * Math.PI, y: Math.random() * Math.PI, z: Math.random() * Math.PI},
+                detail: 1,
+            });
+        }
+    }
+
+    console.log(`Świat gry został stworzony: ${Object.keys(gameState.buildings).length} budynków, ${treesPlaced} drzew i ${gameState.rocks.length} skał.`);
 }
 
 io.on("connection", (socket) => {
   console.log(`Gracz połączony: ${socket.id}`);
-  
   const settings = { 
       mapSize: Object.keys(MAP_SIZES).find(key => MAP_SIZES[key] === MAP_SIZE), 
       amplitude: TERRAIN_AMPLITUDE, 
       scale: TERRAIN_SCALE 
   };
-  
   socket.emit('serverStatus', { 
       configured: isGameConfigured, 
       settings: isGameConfigured ? settings : undefined,
-      devMode: IS_DEV_MODE // Dodana informacja o trybie deweloperskim
+      devMode: IS_DEV_MODE
   });
-
 
   socket.on("joinGame", (data) => {
     if (gameState.players[socket.id]) return; 
@@ -829,7 +894,8 @@ io.on("connection", (socket) => {
         isGameConfigured = true; MAP_SIZE = MAP_SIZES[data.config.mapSize] || 500;
         TERRAIN_AMPLITUDE = data.config.amplitude; TERRAIN_SCALE = data.config.scale;
         console.log("Serwer skonfigurowany przez pierwszego gracza:", data.config);
-        generateHeightMap(); createProceduralCity();
+        generateHeightMap();
+        createInitialEnvironment();
         socket.broadcast.emit('serverStatus', { 
             configured: true, 
             settings: { mapSize: data.config.mapSize, amplitude: TERRAIN_AMPLITUDE, scale: TERRAIN_SCALE },
@@ -888,7 +954,7 @@ io.on("connection", (socket) => {
 
 app.use(express.static(path.join(__dirname)));
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
-app.get('/favicon.ico', (req, res) => res.status(204).send()); // Obsługa favicon.ico
+app.get('/favicon.ico', (req, res) => res.status(204).send());
 
 server.listen(PORT, () => {
   console.log(`Serwer nasłuchuje na porcie ${PORT}`);
