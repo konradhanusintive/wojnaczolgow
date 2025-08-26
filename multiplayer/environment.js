@@ -83,15 +83,24 @@ function createFoliageCanvasTexture() {
         ctx.strokeStyle = gradient;
         ctx.stroke();
     }
-    return new THREE.CanvasTexture(canvas);
+    const tex = new THREE.CanvasTexture(canvas);
+    // Redukcja halo: używamy premultiplied alpha, bez mipmap i filtrów liniowych
+    tex.premultiplyAlpha = true;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
 }
 
 // Zoptymalizowane materiały, tworzone raz
 const trunkMaterial = new THREE.MeshLambertMaterial({ map: createBarkCanvasTexture() });
 const foliageMaterial = new THREE.MeshLambertMaterial({
-    map: createFoliageCanvasTexture(),
+    color: 0x5a9447,
+    alphaMap: createFoliageCanvasTexture(),
     transparent: true,
-    alphaTest: 0.1,
+    alphaTest: 0.35,
+    depthWrite: false,
     side: THREE.DoubleSide
 });
 
@@ -137,6 +146,126 @@ function createBeautifulPineTreeMesh() {
     treeGroup.add(foliageMesh);
     return treeGroup;
 }
+
+// === NOWE KORONY I TYPY DRZEW ===
+const LEAF_COLORS = [0x5a9447, 0x4e8a3b, 0x6aa84f, 0x3c6b4b, 0x7fb26f];
+
+function noisySphere(radius, detail = 2, strength = 0.25) {
+    const geo = new THREE.IcosahedronGeometry(radius, detail);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+        const nx = (Math.random() - 0.5) * strength;
+        const ny = (Math.random() - 0.5) * strength;
+        const nz = (Math.random() - 0.5) * strength;
+        pos.setXYZ(i, pos.getX(i) + nx, pos.getY(i) + ny, pos.getZ(i) + nz);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+}
+
+function createRoundDeciduousTree() {
+    const group = new THREE.Group();
+    const h = 7 + Math.random() * 5;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, h, 12), trunkMaterial);
+    trunk.position.y = h / 2;
+    group.add(trunk);
+    const mat = new THREE.MeshLambertMaterial({ color: LEAF_COLORS[Math.floor(Math.random()*LEAF_COLORS.length)] });
+    const crown = new THREE.Mesh(noisySphere(3 + Math.random()*1.2, 2, 0.35), mat);
+    crown.position.y = h * 0.8;
+    group.add(crown);
+    return group;
+}
+
+function createBoxyDeciduousTree() {
+    const group = new THREE.Group();
+    const h = 6.5 + Math.random() * 5;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, h, 10), trunkMaterial);
+    trunk.position.y = h / 2; group.add(trunk);
+    const mat = new THREE.MeshLambertMaterial({ color: LEAF_COLORS[Math.floor(Math.random()*LEAF_COLORS.length)] });
+    const crown = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+        const size = 2.2 + Math.random()*1.2;
+        const box = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), mat);
+        box.position.set((Math.random()-0.5)*1.8, h*0.75 + (Math.random()-0.5)*0.8, (Math.random()-0.5)*1.8);
+        crown.add(box);
+    }
+    group.add(crown);
+    return group;
+}
+
+function createLowPolyDeciduousTree() {
+    const group = new THREE.Group();
+    const h = 7 + Math.random()*5;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, h, 8), trunkMaterial);
+    trunk.position.y = h/2; group.add(trunk);
+    const mat = new THREE.MeshLambertMaterial({ color: LEAF_COLORS[Math.floor(Math.random()*LEAF_COLORS.length)] });
+    const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(3 + Math.random()*1.0), mat);
+    crown.position.y = h*0.78; group.add(crown);
+    return group;
+}
+
+function createConiferStackedCones() {
+    const group = new THREE.Group();
+    const h = 9 + Math.random()*7;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, h, 10), trunkMaterial);
+    trunk.position.y = h/2; group.add(trunk);
+    const mat = new THREE.MeshLambertMaterial({ color: 0x3c6b4b });
+    const tiers = 6 + Math.floor(Math.random()*3);
+    for(let i=0;i<tiers;i++){
+        const r = (tiers - i) * 1.1;
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(r, r*1.2, 16), mat);
+        cone.position.y = h*0.25 + i*(h*0.07);
+        group.add(cone);
+    }
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 10), mat); tip.position.y = h*0.95; group.add(tip);
+    return group;
+}
+
+function createCypressSlim() {
+    const group = new THREE.Group();
+    const h = 10 + Math.random()*8;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, h, 8), trunkMaterial);
+    trunk.position.y = h/2; group.add(trunk);
+    const mat = new THREE.MeshLambertMaterial({ color: 0x2e6b3f });
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(2.2, h*0.95, 18), mat);
+    cone.position.y = h*0.55; group.add(cone);
+    return group;
+}
+
+function createPalmModern() {
+    const group = new THREE.Group();
+    const h = 11 + Math.random()*7;
+    const trunkGeo = new THREE.CylinderGeometry(0.25, 0.45, h, 10, 12, true);
+    const trunkMesh = new THREE.Mesh(trunkGeo, trunkMaterial);
+    trunkMesh.position.y = h/2; group.add(trunkMesh);
+    const leafMat = new THREE.MeshLambertMaterial({ color: 0x2fa168 });
+    for(let i=0;i<10;i++){
+        const leafGeo = new THREE.PlaneGeometry(6.5, 1.2, 12, 1);
+        const p = leafGeo.attributes.position;
+        for(let v=0; v<p.count; v++){
+            const x = p.getX(v);
+            p.setZ(v, Math.sin((x/6.5)*Math.PI)*0.9);
+        }
+        p.needsUpdate = true;
+        const leaf = new THREE.Mesh(leafGeo, leafMat);
+        leaf.position.set(0, h-0.5, 0);
+        leaf.rotation.y = (i/10)*Math.PI*2;
+        leaf.rotation.x = -Math.PI/3;
+        group.add(leaf);
+    }
+    return group;
+}
+
+const TREE_TYPES = [
+    createBeautifulPineTreeMesh,
+    createConiferStackedCones,
+    createRoundDeciduousTree,
+    createBoxyDeciduousTree,
+    createLowPolyDeciduousTree,
+    createCypressSlim,
+    createPalmModern
+];
 
 
 function createRockGeometry(radius, detail) {
@@ -201,7 +330,10 @@ export function createEnvironment(scene, terrainParams, gameState, aimables) {
     // === 1. Generowanie Lasu z Pojedynczych, Unikalnych Drzew ===
     if (gameState.trees) {
         gameState.trees.forEach(treeData => {
-            const treeMesh = createBeautifulPineTreeMesh();
+            const typeIndex = (typeof treeData.type === 'number' && treeData.type >=0 && treeData.type < TREE_TYPES.length)
+                ? treeData.type
+                : (treeData.id % TREE_TYPES.length);
+            const treeMesh = TREE_TYPES[typeIndex]();
             treeMesh.position.set(treeData.position.x, treeData.position.y, treeData.position.z);
             treeMesh.rotation.y = treeData.rotationY;
             treeMesh.scale.set(treeData.scale, treeData.scale, treeData.scale);
