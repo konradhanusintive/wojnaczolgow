@@ -5,13 +5,18 @@ import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 
 // --- STAŁE I MATERIAŁY WSPÓLNE DLA CZOŁGÓW ---
-export const LAMBERT_MATERIAL = (color) => new THREE.MeshLambertMaterial({ color });
+// Zmodyfikowano, aby zawsze przypisywać nazwę materiałowi
+export const LAMBERT_MATERIAL = (color, matName = 'defaultLambert') => new THREE.MeshLambertMaterial({ color, name: matName });
 
 function createTrackTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = 32;
   canvas.height = 128;
   const ctx = canvas.getContext("2d");
+  if (!ctx) {
+      console.error("Failed to get 2D context for track texture canvas.");
+      return null; // Zwróć null, jeśli kontekst nie został uzyskany
+  }
   ctx.fillStyle = "#3a3a3a";
   ctx.fillRect(0, 0, 32, 128);
   ctx.fillStyle = "#2a2a2a";
@@ -24,8 +29,20 @@ function createTrackTexture() {
   return texture;
 }
 
-// Zmieniono na eksport, aby był widoczny dla innych modułów, jeśli zajdzie taka potrzeba
-export const trackMaterial = new THREE.MeshLambertMaterial({ map: createTrackTexture() });
+// Zmieniono na funkcję zwracającą singleton, z fallbackiem
+let _trackMaterialInstance = null;
+export const trackMaterial = () => {
+    if (!_trackMaterialInstance) {
+        const texture = createTrackTexture();
+        if (texture) {
+            _trackMaterialInstance = new THREE.MeshLambertMaterial({ map: texture, name: 'trackMaterial' });
+        } else {
+            console.error("Failed to create track texture. Using fallback material for tracks.");
+            _trackMaterialInstance = new THREE.MeshLambertMaterial({ color: 0x3a3a3a, name: 'fallbackTrackMaterial' }); // Fallback material
+        }
+    }
+    return _trackMaterialInstance;
+};
 
 
 // --- FUNKCJE TWORZĄCE MODELE CZOŁGÓW ---
@@ -39,7 +56,7 @@ export function createStandardTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'shermanHull');
 
     const hullWidth = 5.5, hullHeight = 1.8, hullLength = 9.0;
     
@@ -57,7 +74,7 @@ export function createStandardTank(color) {
     // Gąsienice
     const trackWidth = 1.2, trackHeight = 2.4, trackLength = hullLength + 1;
     const trackGroup = new THREE.Group();
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial()); // Użyj funkcji
     const rightTrack = leftTrack.clone();
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -76,16 +93,16 @@ export function createStandardTank(color) {
         new THREE.Vector3(-1.5, 2, -2),
         new THREE.Vector3(-1.5, 2, 1.5)
     ];
-    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'shermanTurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444, 'shermanMantlet')));
     mantlet.position.set(0, 0.8, -2.5);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333, 'shermanBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3;
     mantlet.add(barrel);
@@ -124,7 +141,7 @@ export function createPL01Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'pl01Hull');
 
     const hullWidth = 6.0, hullHeight = 1.5, hullLength = 9.5;
     
@@ -150,7 +167,7 @@ export function createPL01Tank(color) {
     // Gąsienice (bardziej schowane)
     const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 1;
     const trackGroup = new THREE.Group();
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 + 0.5;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 - 0.5;
@@ -167,16 +184,16 @@ export function createPL01Tank(color) {
         new THREE.Vector3(0, 1.8, 2.5),
         new THREE.Vector3(0, 1.8, -2.5)
     ];
-    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'pl01Turret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444, 'pl01Mantlet')));
     mantlet.position.set(0, 0.6, -2.8);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333, 'pl01Barrel'));
     barrel.position.z = 3.5;
     mantlet.add(barrel);
 
@@ -212,7 +229,7 @@ export function createAbramsTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'abramsHull');
 
     const hullWidth = 6.5, hullHeight = 2.0, hullLength = 10.0;
     
@@ -224,7 +241,7 @@ export function createAbramsTank(color) {
     // Gąsienice
     const trackWidth = 1.4, trackHeight = 2.0, trackLength = hullLength;
     const trackGroup = new THREE.Group();
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 + 0.8;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 - 0.8;
@@ -235,22 +252,22 @@ export function createAbramsTank(color) {
     tank.add(hullGroup);
 
     // Wieża (bardziej zaokrąglona i masywna)
-    const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.2, 1.0, 8), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.2, 1.0, 8), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'abramsTurretBase'));
     turretBase.position.y = 0.5; // Lekko podniesiona, żeby była nad kadłubem
     turretGroup.add(turretBase);
     
-    const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'abramsTurretTop'));
     turretTop.position.y = 1.1;
     turretGroup.add(turretTop);
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444, 'abramsMantlet')));
     mantlet.position.set(0, 0.5, -3.0);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333, 'abramsBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 4;
     mantlet.add(barrel);
@@ -290,7 +307,7 @@ export function createTigerITank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'tigerHull');
 
     const hullWidth = 7.0, hullHeight = 2.2, hullLength = 11.0;
 
@@ -301,7 +318,7 @@ export function createTigerITank(color) {
 
     // Gąsienice
     const trackWidth = 1.8, trackHeight = 2.5, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -311,16 +328,16 @@ export function createTigerITank(color) {
 
     // Wieża (kwadratowa)
     const turretGeometry = new THREE.BoxGeometry(4.5, 2.5, 4.5);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'tigerTurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 1), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 1), LAMBERT_MATERIAL(0x444444, 'tigerMantlet')));
     mantlet.position.set(0, 0.5, -2.5);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.35, 7, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.35, 7, 12), LAMBERT_MATERIAL(0x333333, 'tigerBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3.5;
     mantlet.add(barrel);
@@ -357,7 +374,7 @@ export function createT3485Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 't34Hull');
 
     const hullWidth = 5.0, hullHeight = 1.7, hullLength = 9.0;
 
@@ -368,7 +385,7 @@ export function createT3485Tank(color) {
 
     // Gąsienice
     const trackWidth = 1.1, trackHeight = 2.0, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -378,16 +395,16 @@ export function createT3485Tank(color) {
 
     // Wieża (zaokrąglona)
     const turretGeometry = new THREE.CylinderGeometry(2.5, 2.0, 1.8, 16, 1, false, 0, Math.PI * 2);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 't34Turret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1), LAMBERT_MATERIAL(0x444444, 't34Mantlet')));
     mantlet.position.set(0, 0.5, -2.0);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 6, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 6, 12), LAMBERT_MATERIAL(0x333333, 't34Barrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3;
     mantlet.add(barrel);
@@ -424,7 +441,7 @@ export function createCromwellTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'cromwellHull');
 
     const hullWidth = 4.8, hullHeight = 1.6, hullLength = 8.5;
 
@@ -435,7 +452,7 @@ export function createCromwellTank(color) {
 
     // Gąsienice
     const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 0.5;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -445,16 +462,16 @@ export function createCromwellTank(color) {
 
     // Wieża
     const turretGeometry = new THREE.BoxGeometry(2.8, 1.8, 3.0);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'cromwellTurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 0.8), LAMBERT_MATERIAL(0x444444, 'cromwellMantlet')));
     mantlet.position.set(0, 0.4, -1.8);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.2, 5, 10), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.2, 5, 10), LAMBERT_MATERIAL(0x333333, 'cromwellBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 2.5;
     mantlet.add(barrel);
@@ -491,7 +508,7 @@ export function createAMX1375Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group(); // Wieża oscylacyjna będzie ruchoma w całości
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'amx13Hull');
 
     const hullWidth = 4.0, hullHeight = 1.2, hullLength = 7.0;
 
@@ -502,7 +519,7 @@ export function createAMX1375Tank(color) {
 
     // Gąsienice
     const trackWidth = 0.9, trackHeight = 1.5, trackLength = hullLength + 0.5;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -511,7 +528,7 @@ export function createAMX1375Tank(color) {
     tank.add(hullGroup);
 
     // Wieża oscylacyjna (uproszczony model)
-    const lowerTurret = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 0.8, 12), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const lowerTurret = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 0.8, 12), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'amx13LowerTurret'));
     lowerTurret.position.y = 0.4; // Zmieniono na 0.4, aby była bliżej "ziemi"
     turretGroup.add(lowerTurret);
 
@@ -521,12 +538,12 @@ export function createAMX1375Tank(color) {
         new THREE.Vector3(0.8, 1.0, 1.0), new THREE.Vector3(0.8, 1.0, -1.5),
         new THREE.Vector3(-0.8, 1.0, -1.5), new THREE.Vector3(-0.8, 1.0, 1.0)
     ];
-    const upperTurret = new THREE.Mesh(new ConvexGeometry(upperTurretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.15)));
+    const upperTurret = new THREE.Mesh(new ConvexGeometry(upperTurretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.15), 'amx13UpperTurret'));
     upperTurret.position.y = 0.8; // w relacji do dolnej części wieży
     turretGroup.add(upperTurret);
     
     // Lufa jest częścią ruchomej górnej części wieży, nie ma osobnego jarzma
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 4.5, 8), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 4.5, 8), LAMBERT_MATERIAL(0x333333, 'amx13Barrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.set(0, 0.8, 2.2); // W relacji do górnej części wieży
     upperTurret.add(barrel);
@@ -562,7 +579,7 @@ export function createType59Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'type59Hull');
 
     const hullWidth = 5.8, hullHeight = 1.9, hullLength = 9.5;
 
@@ -573,7 +590,7 @@ export function createType59Tank(color) {
 
     // Gąsienice
     const trackWidth = 1.2, trackHeight = 2.2, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -583,19 +600,19 @@ export function createType59Tank(color) {
 
     // Wieża (zaokrąglona, "garbaty" kształt T-54)
     const turretGeometry = new THREE.SphereGeometry(2.5, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'type59Turret'));
     turretTop.rotation.x = Math.PI / 2; // Obrót, aby podstawa była płaska
     turretTop.position.y = 0.5; // Delikatnie podniesiona
     turretGroup.add(turretTop);
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 1.0), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 1.0), LAMBERT_MATERIAL(0x444444, 'type59Mantlet')));
     mantlet.position.set(0, 0.4, -2.2);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.3, 6.5, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.3, 6.5, 12), LAMBERT_MATERIAL(0x333333, 'type59Barrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3.25;
     mantlet.add(barrel);
@@ -631,7 +648,7 @@ export function createChiHaTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'chihaHull');
 
     const hullWidth = 4.5, hullHeight = 1.5, hullLength = 7.5;
 
@@ -642,7 +659,7 @@ export function createChiHaTank(color) {
 
     // Gąsienice
     const trackWidth = 0.9, trackHeight = 1.6, trackLength = hullLength + 0.5;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -652,16 +669,16 @@ export function createChiHaTank(color) {
 
     // Wieża (cylindryczna)
     const turretGeometry = new THREE.CylinderGeometry(2.0, 2.0, 1.5, 12);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'chihaTurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 0.7), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 0.7), LAMBERT_MATERIAL(0x444444, 'chihaMantlet')));
     mantlet.position.set(0, 0.3, -1.2);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 4.0, 8), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 4.0, 8), LAMBERT_MATERIAL(0x333333, 'chihaBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 2.0;
     mantlet.add(barrel);
@@ -697,7 +714,7 @@ export function createChiHaTank(color) {
 export function createStrv103BTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group(); // W Strv 103B cały kadłub jest ruchomy góra-dół
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'strvHull');
 
     const hullWidth = 6.0, hullHeight = 1.5, hullLength = 10.0;
 
@@ -726,7 +743,7 @@ export function createStrv103BTank(color) {
 
     // Gąsienice
     const trackWidth = 1.3, trackHeight = 1.8, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -735,7 +752,7 @@ export function createStrv103BTank(color) {
     tank.add(hullGroup);
 
     // Lufa jest sztywno zamontowana w kadłubie, nie ma wieży ani jarzma
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 7.0, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 7.0, 12), LAMBERT_MATERIAL(0x333333, 'strvBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.set(0, hullHeight * 0.5 + 0.3, -hullLength / 2 + 3.5); // Lufa z przodu kadłuba
     hullGroup.add(barrel); // Lufa jest częścią hullGroup
@@ -768,7 +785,7 @@ export function createP40Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'p40Hull');
 
     const hullWidth = 5.2, hullHeight = 1.8, hullLength = 8.8;
 
@@ -779,7 +796,7 @@ export function createP40Tank(color) {
 
     // Gąsienice
     const trackWidth = 1.1, trackHeight = 2.0, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -789,16 +806,16 @@ export function createP40Tank(color) {
 
     // Wieża (kanciasta)
     const turretGeometry = new THREE.BoxGeometry(3.0, 2.0, 3.5);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'p40Turret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 0.8), LAMBERT_MATERIAL(0x444444, 'p40Mantlet')));
     mantlet.position.set(0, 0.4, -2.0);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.5, 10), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.5, 10), LAMBERT_MATERIAL(0x333333, 'p40Barrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 2.75;
     mantlet.add(barrel);
@@ -835,7 +852,7 @@ export function createSkodaT25Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'skodaHull');
 
     const hullWidth = 4.8, hullHeight = 1.7, hullLength = 8.0;
 
@@ -846,7 +863,7 @@ export function createSkodaT25Tank(color) {
 
     // Gąsienice
     const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 0.8;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -856,16 +873,16 @@ export function createSkodaT25Tank(color) {
 
     // Wieża (zaokrąglona, z załadowaniem automatycznym)
     const turretGeometry = new THREE.CylinderGeometry(2.2, 1.8, 1.6, 16);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'skodaTurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.0, 0.8), LAMBERT_MATERIAL(0x444444, 'skodaMantlet')));
     mantlet.position.set(0, 0.4, -1.5);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.0, 10), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.0, 10), LAMBERT_MATERIAL(0x333333, 'skodaBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 2.5;
     mantlet.add(barrel);
@@ -902,7 +919,7 @@ export function createRamIITank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'ramIIHull');
 
     const hullWidth = 5.6, hullHeight = 2.0, hullLength = 8.5;
 
@@ -913,7 +930,7 @@ export function createRamIITank(color) {
 
     // Gąsienice
     const trackWidth = 1.3, trackHeight = 2.2, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -923,16 +940,16 @@ export function createRamIITank(color) {
 
     // Wieża (okrągła, niski profil)
     const turretGeometry = new THREE.CylinderGeometry(2.5, 2.5, 1.2, 24);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'ramIITurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 0.8), LAMBERT_MATERIAL(0x444444, 'ramIIMantlet')));
     mantlet.position.set(0, 0.3, -1.8);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 5.8, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 5.8, 12), LAMBERT_MATERIAL(0x333333, 'ramIIBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 2.9;
     mantlet.add(barrel);
@@ -969,7 +986,7 @@ export function createSentinelAC1Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'sentinelHull');
 
     const hullWidth = 5.3, hullHeight = 1.9, hullLength = 8.7;
 
@@ -980,7 +997,7 @@ export function createSentinelAC1Tank(color) {
 
     // Gąsienice
     const trackWidth = 1.1, trackHeight = 2.1, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -990,19 +1007,19 @@ export function createSentinelAC1Tank(color) {
 
     // Wieża (odlewana, zaokrąglona)
     const turretGeometry = new THREE.SphereGeometry(2.3, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'sentinelTurret'));
     turretTop.rotation.x = Math.PI / 2;
     turretTop.position.y = 0.5;
     turretGroup.add(turretTop);
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444, 'sentinelMantlet')));
     mantlet.position.set(0, 0.4, -2.0);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 5.5, 10), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 5.5, 10), LAMBERT_MATERIAL(0x333333, 'sentinelBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 2.75;
     mantlet.add(barrel);
@@ -1039,7 +1056,7 @@ export function createTuranIIITank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'turanIIIHull');
 
     const hullWidth = 5.0, hullHeight = 1.7, hullLength = 8.0;
 
@@ -1050,7 +1067,7 @@ export function createTuranIIITank(color) {
 
     // Gąsienice
     const trackWidth = 1.0, trackHeight = 1.9, trackLength = hullLength + 0.8;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -1060,16 +1077,16 @@ export function createTuranIIITank(color) {
 
     // Wieża (duża, lekko zaokrąglona)
     const turretGeometry = new THREE.CylinderGeometry(2.3, 2.0, 1.7, 16);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'turanIIITurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444, 'turanIIIMantlet')));
     mantlet.position.set(0, 0.4, -1.5);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.2, 10), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.2, 10), LAMBERT_MATERIAL(0x333333, 'turanIIIBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 2.6;
     mantlet.add(barrel);
@@ -1106,7 +1123,7 @@ export function createBT42Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'bt42Hull');
 
     const hullWidth = 4.2, hullHeight = 1.5, hullLength = 7.0;
 
@@ -1117,7 +1134,7 @@ export function createBT42Tank(color) {
 
     // Gąsienice
     const trackWidth = 0.8, trackHeight = 1.5, trackLength = hullLength + 0.5;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -1126,7 +1143,7 @@ export function createBT42Tank(color) {
     tank.add(hullGroup);
 
     // Wieża (duża, zaokrąglona jak haubica)
-    const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.2, 0.8, 16), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.2, 0.8, 16), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'bt42TurretBase'));
     turretBase.position.y = 0.4; // Zmieniono na 0.4, aby była bliżej "ziemi"
     turretGroup.add(turretBase);
 
@@ -1136,19 +1153,19 @@ export function createBT42Tank(color) {
         new THREE.Vector3(1.5, 1.5, 1.5), new THREE.Vector3(1.5, 1.5, -1.5),
         new THREE.Vector3(-1.5, 1.5, -1.5), new THREE.Vector3(-1.5, 1.5, 1.5)
     ];
-    const turretTop = new THREE.Mesh(new ConvexGeometry(turretTopPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.15)));
+    const turretTop = new THREE.Mesh(new ConvexGeometry(turretTopPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.15), 'bt42TurretTop'));
     turretTop.position.y = 0.8;
     turretGroup.add(turretTop);
 
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 1.0), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 1.0), LAMBERT_MATERIAL(0x444444, 'bt42Mantlet')));
     mantlet.position.set(0, 0.5, -1.5);
     turretTop.add(mantlet); // Mantlet jest częścią górnej wieży, nie całej grupy
 
     // Lufa (krótka haubica)
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.4, 3.0, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.4, 3.0, 12), LAMBERT_MATERIAL(0x333333, 'bt42Barrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 1.5;
     mantlet.add(barrel);
@@ -1185,7 +1202,7 @@ export function createShotKalDaletTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'shotkalHull');
 
     const hullWidth = 6.0, hullHeight = 2.0, hullLength = 10.0;
 
@@ -1196,7 +1213,7 @@ export function createShotKalDaletTank(color) {
 
     // Gąsienice
     const trackWidth = 1.4, trackHeight = 2.2, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -1206,19 +1223,19 @@ export function createShotKalDaletTank(color) {
 
     // Wieża (Centurion, odlewana)
     const turretGeometry = new THREE.SphereGeometry(2.8, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'shotkalTurret'));
     turretTop.rotation.x = Math.PI / 2;
     turretTop.position.y = 0.5;
     turretGroup.add(turretTop);
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.8, 1.0), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.8, 1.0), LAMBERT_MATERIAL(0x444444, 'shotkalMantlet')));
     mantlet.position.set(0, 0.5, -2.5);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.33, 7.0, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.33, 7.0, 12), LAMBERT_MATERIAL(0x333333, 'shotkalBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3.5;
     mantlet.add(barrel);
@@ -1254,7 +1271,7 @@ export function createNahuelDL43Tank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'nahuelHull');
 
     const hullWidth = 5.5, hullHeight = 1.9, hullLength = 9.0;
 
@@ -1265,7 +1282,7 @@ export function createNahuelDL43Tank(color) {
 
     // Gąsienice
     const trackWidth = 1.2, trackHeight = 2.1, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -1275,16 +1292,16 @@ export function createNahuelDL43Tank(color) {
 
     // Wieża (kanciasta)
     const turretGeometry = new THREE.BoxGeometry(3.2, 2.0, 3.5);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'nahuelTurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444, 'nahuelMantlet')));
     mantlet.position.set(0, 0.4, -2.0);
     turretGroup.add(mantlet);
 
     // Lufa
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 6.0, 10), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 6.0, 10), LAMBERT_MATERIAL(0x333333, 'nahuelBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3.0;
     mantlet.add(barrel);
@@ -1321,7 +1338,7 @@ export function createChonmaHoTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'chonmahoHull');
 
     const hullWidth = 6.0, hullHeight = 1.8, hullLength = 9.5;
 
@@ -1332,7 +1349,7 @@ export function createChonmaHoTank(color) {
 
     // Gąsienice
     const trackWidth = 1.3, trackHeight = 2.0, trackLength = hullLength + 1;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -1342,19 +1359,19 @@ export function createChonmaHoTank(color) {
 
     // Wieża (duża, okrągła, odlewana - jak w T-62)
     const turretGeometry = new THREE.SphereGeometry(2.7, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
+    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'chonmahoTurret'));
     turretTop.rotation.x = Math.PI / 2;
     turretTop.position.y = 0.5;
     turretGroup.add(turretTop);
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.6, 1.0), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.6, 1.0), LAMBERT_MATERIAL(0x444444, 'chonmahoMantlet')));
     mantlet.position.set(0, 0.4, -2.5);
     turretGroup.add(mantlet);
 
     // Lufa (długa, potężna)
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.35, 7.5, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.35, 7.5, 12), LAMBERT_MATERIAL(0x333333, 'chonmahoBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3.75;
     mantlet.add(barrel);
@@ -1390,7 +1407,7 @@ export function createK2BlackPantherTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'k2Hull');
 
     const hullWidth = 6.8, hullHeight = 2.2, hullLength = 10.5;
 
@@ -1401,7 +1418,7 @@ export function createK2BlackPantherTank(color) {
 
     // Gąsienice
     const trackWidth = 1.5, trackHeight = 2.5, trackLength = hullLength + 1.5;
-    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
+    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial());
     leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
     const rightTrack = leftTrack.clone();
     rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
@@ -1417,16 +1434,16 @@ export function createK2BlackPantherTank(color) {
         new THREE.Vector3(-2.5, 1.5, -3.0), new THREE.Vector3(-2.5, 1.5, 3.0),
         new THREE.Vector3(0, 2.0, 2.8), new THREE.Vector3(0, 2.0, -2.8) // Kątowe płyty wieży
     ];
-    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'k2Turret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.8, 1.2), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.8, 1.2), LAMBERT_MATERIAL(0x444444, 'k2Mantlet')));
     mantlet.position.set(0, 0.6, -3.0);
     turretGroup.add(mantlet);
 
     // Lufa (długa, potężna)
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.38, 8.0, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.38, 8.0, 12), LAMBERT_MATERIAL(0x333333, 'k2Barrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 4.0;
     mantlet.add(barrel);
@@ -1462,7 +1479,7 @@ export function createRooikatTank(color) {
     const tank = new THREE.Group();
     const hullGroup = new THREE.Group();
     const turretGroup = new THREE.Group();
-    const hullMaterial = LAMBERT_MATERIAL(color);
+    const hullMaterial = LAMBERT_MATERIAL(color, 'rooikatHull');
 
     const hullWidth = 3.5, hullHeight = 1.5, hullLength = 9.0; // Długi i wąski kadłub, kołowy
 
@@ -1474,7 +1491,7 @@ export function createRooikatTank(color) {
     // Koła (8x8), dla uproszczenia jako proste cylindry
     const wheelRadius = 1.0;
     const wheelThickness = 0.5;
-    const wheelMaterial = LAMBERT_MATERIAL(0x222222);
+    const wheelMaterial = LAMBERT_MATERIAL(0x222222, 'rooikatWheel');
 
     for (let i = 0; i < 4; i++) {
         const wheelOffset = hullLength / 2 - (i * (hullLength / 3)); // Rozłożenie kół
@@ -1492,16 +1509,16 @@ export function createRooikatTank(color) {
 
     // Wieża (niska, lekko kanciasta)
     const turretGeometry = new THREE.BoxGeometry(2.5, 1.5, 3.0);
-    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
+    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1), 'rooikatTurret')));
 
     // Jarzmo działa
     const mantlet = new THREE.Group();
-    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
+    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.0, 0.8), LAMBERT_MATERIAL(0x444444, 'rooikatMantlet')));
     mantlet.position.set(0, 0.4, -1.8);
     turretGroup.add(mantlet);
 
     // Lufa (długa, armata dużej prędkości)
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 6.5, 12), LAMBERT_MATERIAL(0x333333));
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 6.5, 12), LAMBERT_MATERIAL(0x333333, 'rooikatBarrel'));
     barrel.rotation.x = Math.PI / 2;
     barrel.position.z = 3.25;
     mantlet.add(barrel);
