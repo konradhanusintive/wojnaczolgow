@@ -69,7 +69,9 @@ const gameObjects = {
     fires: {},
     fallingTrees: [],
     trees: {},
-    rocks: {}
+    burningTrees: {},
+    rocks: {},
+    treeBounds: {}
 };
 
 const socket = io();
@@ -553,6 +555,30 @@ function createFireEffect(fireData) {
     gameObjects.fires[fireData.id] = fireObject;
 }
 
+function igniteTree(treeId) {
+    const treeMesh = gameObjects.trees[treeId];
+    if (!treeMesh || gameObjects.burningTrees[treeId]) return;
+    const flameId = `tree-${treeId}`;
+    createFireEffect({ id: flameId, position: { x: treeMesh.position.x, y: treeMesh.position.y + 2, z: treeMesh.position.z }, initialRadius: 1.5 });
+    // Split tree render parts for faster updates
+    const trunkMeshes = []; const foliageMeshes = [];
+    treeMesh.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+            if (obj.material.transparent || obj.material.alphaMap) foliageMeshes.push(obj);
+            else trunkMeshes.push(obj);
+        }
+    });
+    gameObjects.burningTrees[treeId] = {
+        startTime: performance.now(),
+        mesh: treeMesh,
+        stage: 'burning', // burning -> charred
+        spreadCooldown: 0.4,
+        radius: 1.5,
+        trunkMeshes,
+        foliageMeshes
+    };
+}
+
 // --- KLASA DO ZARZĄDZANIA EKRANEM WYBORU ---
 class TankSelectionManager {
     constructor(tankKeys) {
@@ -908,6 +934,14 @@ function initGame(payload) {
     
     gameObjects.trees = environmentMeshes.trees;
     gameObjects.rocks = environmentMeshes.rocks;
+    // Cache approximate tree bounds (sphere) for fast collision
+    for (const id in gameObjects.trees) {
+        const t = gameObjects.trees[id];
+        const box = new THREE.Box3().setFromObject(t);
+        const radius = box.getSize(new THREE.Vector3()).length() * 0.35; // conservative
+        const center = box.getCenter(new THREE.Vector3());
+        gameObjects.treeBounds[id] = { center, radius };
+    }
 
     reconcileGameState(clientGameState);
     
@@ -985,9 +1019,16 @@ function setupEventListeners() {
         if (!isGameStarted) return;
         if (e.button === 0) { handleFireInput(); }
         if (e.button === 2) { 
-            renderer.domElement.requestPointerLock();
+            // Robust pointer lock request: ensure element is in the same document
+            try {
+                const targetEl = (renderer && renderer.domElement && document.body.contains(renderer.domElement)) ? renderer.domElement : document.body;
+                if (targetEl && targetEl.requestPointerLock) targetEl.requestPointerLock({ unadjustedMovement: true });
+            } catch (err) {
+                console.warn('Pointer lock request failed:', err);
+            }
         }
     });
+    document.addEventListener('pointerlockerror', () => console.warn('Pointer lock error'));
     document.addEventListener('mouseup', (e) => {
         if (!isGameStarted) return;
         if (e.button === 2) {
@@ -1336,6 +1377,10 @@ function animate() {
                     clientObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), moveDirection);
                     if (type === 'missiles') clientObj.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2));
                 }
+                // Collision check on client to ignite trees for visual effect
+                if (type === 'projectiles' || type === 'machineGunBullets') {
+                    checkProjectileCollision(gameObjects[type][id], delta, type);
+                }
                 clientObj.position.lerp(serverPos, 0.5); 
                 gameObjects[type][id].lastPosition.copy(clientObj.position);
             }
@@ -1382,6 +1427,65 @@ function animate() {
                 p.mesh.scale.set(currentScale, currentScale, currentScale);
                 p.mesh.lookAt(camera.position);
             }
+        }
+    }
+
+    // Update burning trees: spread and transition to charred skeletons
+    const SPREAD_RADIUS = 8;
+    const BURN_DURATION = 12; // seconds total
+    for (const treeId in gameObjects.burningTrees) {
+        const bt = gameObjects.burningTrees[treeId];
+        const elapsed = (performance.now() - bt.startTime) / 1000;
+        // Grow flame radius for visuals
+        bt.radius = Math.min(3.5, bt.radius + delta * 0.5);
+        const flame = gameObjects.fires[`tree-${treeId}`];
+        if (flame) { // nudge particles outward as radius grows
+            const spawnRadius = bt.radius * 0.5;
+            for (let i = 0; i < flame.particles.length; i += Math.floor(flame.particles.length / 6) || 1) {
+                const p = flame.particles[i];
+                p.mesh.position.copy(flame.position).add(new THREE.Vector3((Math.random()-0.5)*spawnRadius, Math.random()*1.5, (Math.random()-0.5)*spawnRadius));
+            }
+        }
+        // 5-stage visual burn progression (0-1)
+        const burnProgress = Math.min(1, elapsed / BURN_DURATION);
+        const stage = Math.floor(burnProgress * 5); // 0..4 then 5 => charred
+        // Darken trunk gradually
+        const trunkDark = 1 - burnProgress * 0.8;
+        bt.trunkMeshes.forEach(m => {
+            m.material = m.material.clone();
+            const c = new THREE.Color(trunkDark, trunkDark * 0.7, trunkDark * 0.6);
+            m.material.color.copy(c);
+        });
+        // Fade foliage out over stages
+        bt.foliageMeshes.forEach(m => {
+            m.material = m.material.clone();
+            if (m.material.opacity === undefined) m.material.opacity = 1;
+            m.material.opacity = Math.max(0, 1 - burnProgress * 1.2);
+        });
+        // Spread fire to nearby trees periodically
+        bt.spreadCooldown -= delta;
+        if (bt.spreadCooldown <= 0) {
+            bt.spreadCooldown = 0.7 + Math.random() * 0.6;
+            for (const neighborId in gameObjects.trees) {
+                if (neighborId === treeId) continue;
+                const neighbor = gameObjects.trees[neighborId];
+                if (!neighbor || gameObjects.burningTrees[neighborId]) continue;
+                if (neighbor.position.distanceTo(bt.mesh.position) <= SPREAD_RADIUS) {
+                    igniteTree(neighborId);
+                }
+            }
+        }
+        // After burning time, remove foliage and darken trunk
+        if (elapsed >= BURN_DURATION && bt.stage === 'burning') {
+            // Remove any fire effect for this tree
+            const flame = gameObjects.fires[`tree-${treeId}`];
+            if (flame) {
+                flame.particles.forEach(p => { scene.remove(p.mesh); });
+                delete gameObjects.fires[`tree-${treeId}`];
+            }
+            bt.stage = 'charred';
+            bt.foliageMeshes.forEach(m => m.visible = false);
+            bt.trunkMeshes.forEach(m => { m.material = m.material.clone(); m.material.color = new THREE.Color(0x222222); });
         }
     }
 
@@ -1707,3 +1811,46 @@ socket.on('treeFallen', (data) => {
 // --- START APLIKACJI ---
 initializeUI();
 animate();
+
+function checkProjectileCollision(projectile, delta, containerType) {
+    const currentPosition = projectile.mesh.position;
+    const lastPosition = projectile.lastPosition || currentPosition.clone();
+    const direction = new THREE.Vector3().subVectors(currentPosition, lastPosition);
+    const distance = direction.length();
+    if (distance <= 0.0001) { projectile.lastPosition = currentPosition.clone(); return; }
+    direction.normalize();
+    // First: broad-phase segment-sphere against cached tree bounds
+    let ignitedTreeId = null;
+    for (const treeId in gameObjects.treeBounds) {
+        const { center, radius } = gameObjects.treeBounds[treeId];
+        const seg = currentPosition.clone().sub(lastPosition);
+        const segLenSq = seg.lengthSq();
+        if (segLenSq === 0) continue;
+        const t = Math.max(0, Math.min(1, center.clone().sub(lastPosition).dot(seg) / segLenSq));
+        const closest = lastPosition.clone().add(seg.multiplyScalar(t));
+        if (closest.distanceToSquared(center) <= (radius * radius)) { ignitedTreeId = treeId; break; }
+    }
+    if (!ignitedTreeId) {
+        // Fallback precise raycast
+        const ray = new THREE.Raycaster(lastPosition, direction, 0, distance + 2);
+        const intersects = ray.intersectObjects(aimables, true);
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            let node = hit.object;
+            while (node && !ignitedTreeId) {
+                for (const treeId in gameObjects.trees) { if (gameObjects.trees[treeId] === node) { ignitedTreeId = treeId; break; } }
+                node = node ? node.parent : null;
+            }
+        }
+    }
+    if (ignitedTreeId) {
+        igniteTree(ignitedTreeId);
+        scene.remove(projectile.mesh);
+        if (projectile.mesh.geometry) projectile.mesh.geometry.dispose();
+        if (projectile.mesh.material && projectile.mesh.material.dispose) projectile.mesh.material.dispose();
+        const mapName = containerType === 'machineGunBullets' ? 'machineGunBullets' : (containerType === 'missiles' ? 'missiles' : 'projectiles');
+        delete gameObjects[mapName][projectile.id];
+        return;
+    }
+    projectile.lastPosition = currentPosition.clone();
+}
