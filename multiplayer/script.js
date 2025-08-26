@@ -1,7 +1,16 @@
 import * as THREE from "three";
-import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
+// Usunięto import ConvexGeometry, ponieważ jest już w tankModels.js
 import { createSkydomeBackground } from './background.js';
 import { createEnvironment } from './environment.js';
+// Importujemy funkcje do tworzenia czołgów i materiał z nowego pliku
+import { 
+    createStandardTank, createPL01Tank, createAbramsTank, LAMBERT_MATERIAL,
+    createTigerITank, createT3485Tank, createCromwellTank, createAMX1375Tank,
+    createType59Tank, createChiHaTank, createStrv103BTank, createP40Tank,
+    createSkodaT25Tank, createRamIITank, createSentinelAC1Tank, createTuranIIITank,
+    createBT42Tank, createShotKalDaletTank, createNahuelDL43Tank, createChonmaHoTank,
+    createK2BlackPantherTank, createRooikatTank
+} from './tankModels.js'; 
 
 let scene, renderer, clock, camera;
 let localPlayerId = null;
@@ -9,11 +18,10 @@ let clientGameState = {};
 let isGameStarted = false;
 let isSelectionScreenActive = false;
 let tankSelectionManager;
-let environmentMeshes = {}; // <-- Zmieniona nazwa, będzie przechowywać drzewa, skały itp.
+let environmentMeshes = {}; 
 
 let brickMaterial;
 let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial, fireMaterial, scorchMarkMaterial;
-let sandTrackMaterial, grassTrackMaterial;
 let minimapCanvas, minimapCtx;
 let minimapScanAngle = 0;
 
@@ -53,24 +61,45 @@ const gameObjects = {
     missiles: {},
     machineGunBullets: {},
     projectiles: {},
-    particles: [],
+    particles: [], // Zmodyfikowana tablica do przechowywania spójnych obiektów cząstek
     wreckage: [],
     smokeParticles: [], 
     tracks: {},
     craters: {},
     fires: {},
-    fallingTrees: [], // <-- Przechowuje przewracające się drzewa
-    trees: {}, // <-- Mapa do przechowywania siatek drzew
-    rocks: {}  // <-- Mapa do przechowywania siatek skał
+    fallingTrees: [],
+    trees: {},
+    rocks: {}
 };
 
 const socket = io();
 
 // --- STAŁE I DANE ---
 const TANKS_DATA = {
-  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0, sniperCamYOffset: 1.8 },
-  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5, sniperCamYOffset: 2.2 },
-  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5, sniperCamYOffset: 2.0 },
+  // Istniejące czołgi (standard to teraz M4 Sherman)
+  pl01: { name: "PL-01 Concept (Polska)", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0, sniperCamYOffset: 1.8, isPremium: false },
+  abrams: { name: "M1 Abrams (USA)", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5, sniperCamYOffset: 2.2, isPremium: true },
+  standard: { name: "M4 Sherman (USA)", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5, sniperCamYOffset: 2.0, isPremium: false },
+  
+  // Nowe czołgi
+  tigerI: { name: "Tiger I (Niemcy)", stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, create: createTigerITank, hullWidth: 7.0, sniperCamYOffset: 2.5, isPremium: false },
+  t3485: { name: "T-34-85 (ZSRR)", stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, create: createT3485Tank, hullWidth: 5.0, sniperCamYOffset: 1.9, isPremium: false },
+  cromwell: { name: "Cromwell (Wielka Brytania)", stats: { hp: 90, damage: 0.9, speed: 20, turretRot: 1.9 }, create: createCromwellTank, hullWidth: 4.8, sniperCamYOffset: 1.8, isPremium: false },
+  amx1375: { name: "AMX 13 75 (Francja)", stats: { hp: 80, damage: 0.95, speed: 22, turretRot: 2.0 }, create: createAMX1375Tank, hullWidth: 4.0, sniperCamYOffset: 1.5, isPremium: false },
+  type59: { name: "Type 59 (Chiny)", stats: { hp: 110, damage: 1.1, speed: 14, turretRot: 1.3 }, create: createType59Tank, hullWidth: 5.8, sniperCamYOffset: 2.0, isPremium: true },
+  chiha: { name: "Chi-Ha (Japonia)", stats: { hp: 70, damage: 0.8, speed: 12, turretRot: 1.4 }, create: createChiHaTank, hullWidth: 4.5, sniperCamYOffset: 1.7, isPremium: false },
+  strv103b: { name: "Strv 103B (Szwecja)", stats: { hp: 120, damage: 1.3, speed: 17, turretRot: 0.0 }, create: createStrv103BTank, hullWidth: 6.0, sniperCamYOffset: 1.5, isPremium: true }, // Strv 103B bez obrotu wieży
+  p40: { name: "P40 (Włochy)", stats: { hp: 95, damage: 0.9, speed: 13, turretRot: 1.4 }, create: createP40Tank, hullWidth: 5.2, sniperCamYOffset: 1.9, isPremium: false },
+  skodaT25: { name: "Škoda T 25 (Czechosłowacja)", stats: { hp: 90, damage: 1.0, speed: 18, turretRot: 1.7 }, create: createSkodaT25Tank, hullWidth: 4.8, sniperCamYOffset: 1.8, isPremium: false },
+  ramII: { name: "Ram II (Kanada)", stats: { hp: 100, damage: 0.95, speed: 14, turretRot: 1.5 }, create: createRamIITank, hullWidth: 5.6, sniperCamYOffset: 2.1, isPremium: false },
+  sentinelAC1: { name: "Sentinel AC 1 (Australia)", stats: { hp: 100, damage: 0.98, speed: 13, turretRot: 1.4 }, create: createSentinelAC1Tank, hullWidth: 5.3, sniperCamYOffset: 2.0, isPremium: false },
+  turanIII: { name: "Turán III (Węgry)", stats: { hp: 88, damage: 0.85, speed: 11, turretRot: 1.3 }, create: createTuranIIITank, hullWidth: 5.0, sniperCamYOffset: 1.8, isPremium: false },
+  bt42: { name: "BT-42 (Finlandia)", stats: { hp: 80, damage: 1.1, speed: 20, turretRot: 1.5 }, create: createBT42Tank, hullWidth: 4.2, sniperCamYOffset: 1.7, isPremium: false },
+  shotkaldalet: { name: "Shot Kal Dalet (Izrael)", stats: { hp: 125, damage: 1.15, speed: 12, turretRot: 1.1 }, create: createShotKalDaletTank, hullWidth: 6.0, sniperCamYOffset: 2.1, isPremium: true },
+  nahueldl43: { name: "Nahuel DL 43 (Argentyna)", stats: { hp: 98, damage: 1.0, speed: 14, turretRot: 1.4 }, create: createNahuelDL43Tank, hullWidth: 5.5, sniperCamYOffset: 2.0, isPremium: false },
+  chonmaho: { name: "Ch'ŏnma-ho (Korea Północna)", stats: { hp: 115, damage: 1.1, speed: 15, turretRot: 1.3 }, create: createChonmaHoTank, hullWidth: 6.0, sniperCamYOffset: 2.0, isPremium: false },
+  k2blackpanther: { name: "K2 Black Panther (Korea Południowa)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, create: createK2BlackPantherTank, hullWidth: 6.8, sniperCamYOffset: 2.3, isPremium: true },
+  rooikat: { name: "Rooikat (RPA)", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, create: createRooikatTank, hullWidth: 3.5, sniperCamYOffset: 1.6, isPremium: false },
 };
 
 const WEAPONS_DATA = {
@@ -96,12 +125,7 @@ const PerlinNoise = new (function() {
 PerlinNoise.init(Math.random());
 
 // --- FUNKCJE TWORZĄCE OBIEKTY 3D ---
-const LAMBERT_MATERIAL = (color) => new THREE.MeshLambertMaterial({ color });
-function createTrackTexture() {
-  const canvas = document.createElement("canvas"); canvas.width = 32; canvas.height = 128; const ctx = canvas.getContext("2d"); ctx.fillStyle = "#3a3a3a"; ctx.fillRect(0, 0, 32, 128); ctx.fillStyle = "#2a2a2a";
-  for (let i = 0; i < 128; i += 8) { ctx.fillRect(0, i, 32, 4); } const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping; return texture;
-}
-const trackMaterial = new THREE.MeshLambertMaterial({ map: createTrackTexture() });
+// Usunięto LAMBERT_MATERIAL, createTrackTexture, trackMaterial - przeniesione do tankModels.js
 
 function createGroundTexture(heightData, params) {
     const canvas = document.createElement("canvas"); const size = 512; canvas.width = size; canvas.height = size;
@@ -128,9 +152,7 @@ function createBrickMaterial() {
     const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
     return new THREE.MeshLambertMaterial({ map: texture });
 }
-function createStandardTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 5.5, hullHeight = 1.8, hullLength = 9.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength - 2), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const glacis = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight * 1.2, 2.5), hullMaterial); glacis.position.set(0, hullHeight / 2 - 0.2, -hullLength / 2 + 0.5); glacis.rotation.x = -Math.PI / 6; hullGroup.add(glacis); const trackWidth = 1.2, trackHeight = 2.4, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); const rightTrack = leftTrack.clone(); leftTrack.position.x = -hullWidth / 2 - trackWidth / 2; rightTrack.position.x = hullWidth / 2 + trackWidth / 2; trackGroup.add(leftTrack, rightTrack); tank.add(hullGroup); const turretPoints = [new THREE.Vector3(2, 0, 2), new THREE.Vector3(2, 0, -2.5), new THREE.Vector3(-2, 0, -2.5), new THREE.Vector3(-2, 0, 2), new THREE.Vector3(1.5, 2, 1.5), new THREE.Vector3(1.5, 2, -2), new THREE.Vector3(-1.5, 2, -2), new THREE.Vector3(-1.5, 2, 1.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.8, -2.5); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 3; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 3, 0); barrel.add(barrelTip); turretGroup.position.y = hullHeight + 0.1; turretGroup.position.z = 1; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.6, (hullLength - 2) / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
-function createPL01Tank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.0, hullHeight = 1.5, hullLength = 9.5; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.8, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const sidePanelGeom = new THREE.BoxGeometry(0.5, hullHeight * 1.5, hullLength); const leftPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); leftPanel.position.set(-hullWidth / 2, hullHeight / 2, 0); leftPanel.rotation.z = 0.5; hullGroup.add(leftPanel); const rightPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); rightPanel.position.set(hullWidth / 2, hullHeight / 2, 0); rightPanel.rotation.z = -0.5; hullGroup.add(rightPanel); tank.add(hullGroup); const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.5; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.5; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.5; hullGroup.add(trackGroup); const turretPoints = [new THREE.Vector3(2.5, 0, 3), new THREE.Vector3(2.5, 0, -3), new THREE.Vector3(-2.5, 0, -3), new THREE.Vector3(-2.5, 0, 3), new THREE.Vector3(0, 1.8, 2.5), new THREE.Vector3(0, 1.8, -2.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.6, -2.8); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333)); barrel.position.z = 3.5; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 0, 3.5); barrel.add(barrelTip); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.7, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
-function createAbramsTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.5, hullHeight = 2.0, hullLength = 10.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.7, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const trackWidth = 1.4, trackHeight = 2.0, trackLength = hullLength; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.8; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.8; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.6; hullGroup.add(trackGroup); tank.add(hullGroup); const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.2, 1.0, 8), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretGroup.add(turretBase); const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretTop.position.y = 1.1; turretGroup.add(turretTop); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.5, -3.0); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 4; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 4, 0); barrel.add(barrelTip); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.5, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
+// Usunięto createStandardTank, createPL01Tank, createAbramsTank - przeniesione do tankModels.js
 
 function getHeightAt(x, z) {
     if (!heightMap || !terrainParams) return 0;
@@ -139,7 +161,8 @@ function getHeightAt(x, z) {
     if (x1 < 0 || x1 > segments || z1 < 0 || z1 > segments || !heightMap[x1] || !heightMap[x2]) return 0;
     const h11 = heightMap[x1][z1]; const h12 = heightMap[x1][z2]; const h21 = heightMap[x2][z1]; const h22 = heightMap[x2][z2];
     if (h11 === undefined || h12 === undefined || h21 === undefined || h22 === undefined) return 0;
-    const tx = gridX - x1; const tz = gridZ - z1; const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx; return h_x1 * (1 - tz) + h_x2 * tz;
+    const tx = gridX - x1; const tz = gridZ - z1; const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx; 
+    return h_x1 * (1 - tz) + h_x2 * tz;
 }
 
 function createTrackMarkTexture(type) {
@@ -161,6 +184,11 @@ function createTrackMarkTexture(type) {
     }
     return new THREE.CanvasTexture(canvas);
 }
+
+// Globalne materiały dla śladów gąsienic, aby nie tworzyć ich w kółko
+const sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
+const grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
+
 
 function createBuildingMesh(buildingData) {
     const { id, position, brickSize, bricks, dimensions } = buildingData;
@@ -210,16 +238,22 @@ function createAmmoCrateMesh() {
     return group;
 }
 
+// Zmodyfikowana funkcja createExplosion
 function createExplosion(position, scale, color = null) {
   const particleCount = 20 * scale;
   for (let i = 0; i < particleCount; i++) {
     const particleColor = color ? color : (Math.random() > 0.5 ? 0xffa500 : 0xff4500);
-    const particle = new THREE.Mesh( new THREE.SphereGeometry(0.2 * scale, 4, 4), new THREE.MeshBasicMaterial({ color: particleColor }) );
-    particle.position.copy(position);
-    particle.velocity = new THREE.Vector3( Math.random() - 0.5, Math.random(), Math.random() - 0.5).normalize().multiplyScalar(Math.random() * 20 * scale);
-    particle.lifespan = Math.random() * 0.8 + 0.3;
-    gameObjects.particles.push(particle);
-    scene.add(particle);
+    const particleMesh = new THREE.Mesh( new THREE.SphereGeometry(0.2 * scale, 4, 4), new THREE.MeshBasicMaterial({ color: particleColor }) );
+    particleMesh.position.copy(position);
+    
+    // Tworzymy spójny obiekt cząstki
+    const particleWrapper = {
+        mesh: particleMesh,
+        velocity: new THREE.Vector3( Math.random() - 0.5, Math.random(), Math.random() - 0.5).normalize().multiplyScalar(Math.random() * 20 * scale),
+        lifespan: Math.random() * 0.8 + 0.3,
+    };
+    gameObjects.particles.push(particleWrapper);
+    scene.add(particleWrapper.mesh); // Dodajemy mesh z wrappera do sceny
   }
 }
 function destroyObjectWithWreckage(object, parts) {
@@ -312,19 +346,25 @@ function triggerMuzzleFlash(barrel) {
         }
     }, 50);
 }
+// Zmodyfikowana funkcja createHitEffect
 function createHitEffect(position, impulse) {
     for (let i = 0; i < 15; i++) {
-        const particle = new THREE.Mesh(
+        const particleMesh = new THREE.Mesh(
             new THREE.BoxGeometry(0.1, 0.1, 0.8),
             new THREE.MeshBasicMaterial({ color: 0xffff00 })
         );
-        particle.position.copy(position);
+        particleMesh.position.copy(position);
         const randomDir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
         const reflection = new THREE.Vector3().copy(impulse).reflect(randomDir).normalize();
-        particle.velocity = reflection.multiplyScalar(Math.random() * 20 + 10);
-        particle.lifespan = Math.random() * 0.4 + 0.2;
-        gameObjects.particles.push(particle);
-        scene.add(particle);
+        
+        // Tworzymy spójny obiekt cząstki
+        const particleWrapper = {
+            mesh: particleMesh,
+            velocity: reflection.multiplyScalar(Math.random() * 20 + 10),
+            lifespan: Math.random() * 0.4 + 0.2,
+        };
+        gameObjects.particles.push(particleWrapper);
+        scene.add(particleWrapper.mesh); // Dodajemy mesh z wrappera do sceny
     }
     createExplosion(position, 1.0);
 }
@@ -406,23 +446,36 @@ class TankSelectionManager {
     init() {
         this.tankKeys.forEach(tankKey => {
             const canvas = document.getElementById(`canvas-${tankKey}`);
-            if (!canvas || canvas.clientWidth === 0) {
-                console.error(`Canvas for ${tankKey} not found or has no size.`);
-                return;
+            if (!canvas || canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+                console.warn(`Canvas for ${tankKey} not found or has no size (width: ${canvas?.clientWidth}, height: ${canvas?.clientHeight}). Skipping miniature setup.`);
+                return; // Pomiń setup, jeśli canvas nie jest gotowy
             }
             const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            // Ustawienia kamery dla miniatury
+            const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+            camera.position.set(0, 3, 7); // Nieco wyżej i bliżej
+            camera.lookAt(0, -1, 0); // Spójrz lekko w dół, na środek podstawy czołgu
+
             const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
             renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-            scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-            dirLight.position.set(5, 10, 7);
+            
+            // Subtelne tło dla kontrastu
+            scene.background = new THREE.Color(0x1a1a1a); 
+
+            // Oświetlenie dla miniatury
+            scene.add(new THREE.AmbientLight(0xffffff, 1.5)); // Wzrost intensywności
+            const dirLight = new THREE.DirectionalLight(0xffffff, 2.0); // Wzrost intensywności
+            dirLight.position.set(5, 10, 7).normalize();
             scene.add(dirLight);
+            const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight2.position.set(-5, 5, -7).normalize();
+            scene.add(dirLight2);
+
             const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa));
-            tankMesh.scale.set(0.6, 0.6, 0.6);
-            tankMesh.position.y = -2.5;
+            tankMesh.scale.set(0.7, 0.7, 0.7); // Nieco większa skala
+            tankMesh.position.y = -1.8; // Dostosuj, aby czołg był nad "ziemią" w podglądzie
             scene.add(tankMesh);
-            camera.position.z = 8;
+            
             const target = {
                 canvas, scene, camera, renderer, tankMesh,
                 isDragging: false,
@@ -495,23 +548,51 @@ function initializeUI() {
     document.getElementById("intro-logo").addEventListener("animationend", () => {
         document.getElementById("intro-screen").style.display = "none"; 
         document.getElementById("start-screen").style.display = "flex";
+        // Zapewnij, że managera czołgów inicjalizujemy po tym, jak DOM jest w pełni załadowany i widoczny.
+        // Czasem potrzebny jest delay, aby przeglądarka obliczyła clientWidth/clientHeight.
         setTimeout(() => {
             isSelectionScreenActive = true;
             tankSelectionManager = new TankSelectionManager(Object.keys(TANKS_DATA));
             tankSelectionManager.init();
-        }, 100);
+        }, 100); // Mały delay
     });
+    
+    const tankSelectionContainer = document.querySelector('.tank-selection-container');
+    tankSelectionContainer.innerHTML = ''; // Wyczyść istniejące karty, jeśli są
+
+    // Generowanie kart czołgów dynamicznie
     Object.keys(TANKS_DATA).forEach((tankKey) => {
         const tank = TANKS_DATA[tankKey];
-        document.getElementById(`bar-${tankKey}-hp`).style.width = `${(tank.stats.hp / 150) * 100}%`; document.getElementById(`bar-${tankKey}-dmg`).style.width = `${(tank.stats.damage / 40) * 100}%`;
-        document.getElementById(`bar-${tankKey}-spd`).style.width = `${(tank.stats.speed / 20) * 100}%`; document.getElementById(`bar-${tankKey}-rot`).style.width = `${(tank.stats.turretRot / 2) * 100}%`;
+        const tankCard = document.createElement('div');
+        tankCard.className = `tank-card ${tank.isPremium ? 'locked' : ''}`;
+        tankCard.id = `select-${tankKey}`;
+        tankCard.innerHTML = `
+            ${tank.isPremium ? '<div class="premium-label">PREMIUM</div>' : ''}
+            <h3>${tank.name}</h3>
+            <canvas id="canvas-${tankKey}" class="tank-canvas"></canvas>
+            <div class="stats-container">
+                <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-${tankKey}-hp" class="stat-bar-fill"></div></div></div>
+                <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-${tankKey}-dmg" class="stat-bar-fill"></div></div></div>
+                <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-${tankKey}-spd" class="stat-bar-fill"></div></div></div>
+                <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-${tankKey}-rot" class="stat-bar-fill"></div></div></div>
+            </div>
+            <button class="select-button" ${tank.isPremium ? 'disabled' : ''}>Wybierz i Walcz</button>
+        `;
+        tankSelectionContainer.appendChild(tankCard);
+
+        // Aktualizacja pasków statystyk
+        document.getElementById(`bar-${tankKey}-hp`).style.width = `${(tank.stats.hp / 150) * 100}%`; 
+        document.getElementById(`bar-${tankKey}-dmg`).style.width = `${(tank.stats.damage / 40) * 100}%`;
+        document.getElementById(`bar-${tankKey}-spd`).style.width = `${(tank.stats.speed / 25) * 100}%`; 
+        document.getElementById(`bar-${tankKey}-rot`).style.width = `${(tank.stats.turretRot / 2.0) * 100}%`; 
     });
     document.querySelectorAll(".select-button").forEach((button) => {
         button.addEventListener("click", (e) => {
             if (button.disabled) return; 
             isSelectionScreenActive = false;
             if (tankSelectionManager) tankSelectionManager.destroy();
-            const card = e.target.closest(".tank-card"); const tankType = card.id.split("-")[1];
+            const card = e.target.closest(".tank-card"); 
+            const tankType = card.id.split("-")[1]; 
             const mapSize = document.querySelector('input[name="map-size"]:checked').value;
             const amplitude = parseInt(document.getElementById('terrain-amplitude').value, 10);
             const scale = parseInt(document.getElementById('terrain-scale').value, 10);
@@ -644,8 +725,8 @@ function initGame(payload) {
     cloudSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0xcccccc, depthWrite: false, opacity: 0.8 });
     muzzleFlashMaterial = new THREE.SpriteMaterial({ map: createMuzzleFlashTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     
-    sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
-    grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
+    // Używamy globalnych materiałów dla śladów gąsienic, są definiowane globalnie w tym pliku.
+    // sandTrackMaterial i grassTrackMaterial są teraz zadeklarowane i użyte bez problemu.
     
     fireMaterial = new THREE.MeshBasicMaterial({ map: createFireTexture(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     scorchMarkMaterial = new THREE.MeshBasicMaterial({ map: createScorchMarkTexture(), transparent: true, depthWrite: false });
@@ -675,7 +756,7 @@ function initGame(payload) {
 }
 
 function handleFireInput() {
-    if (!canFire || !localPlayerId || !clientGameState.players[localPlayerId] || clientGameState.players[localPlayerId].isDestroyed) return;
+    if (!canFire || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || clientGameState.players[localPlayerId].isDestroyed) return;
     const playerState = clientGameState.players[localPlayerId];
     if (playerState.isEmpDisabled) return;
     let currentCooldown = 0.5;
@@ -832,19 +913,25 @@ function createObjectMesh(payload) {
         case 'crate': newMesh = createSupplyCrate(); break;
         case 'ammoCrate': newMesh = createAmmoCrateMesh(); break;
         case 'track':
+            // Używamy globalnych materiałów dla śladów gąsienic
             const trackMat = (data.type === 'sand' || data.type === 'mud') ? sandTrackMaterial.clone() : grassTrackMaterial.clone();
             newMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 4.0), trackMat);
             newMesh.rotation.x = -Math.PI / 2;
             newMesh.rotation.z = data.rotationY;
             break;
         case 'fire':
-            createFireEffect(data);
-            return;
+            createFireEffect(data); return;
     }
     if (newMesh) {
-        newMesh.position.set(data.position.x, data.position.y + (type === 'track' ? 0.06 : 0), data.position.z);
-        if(data.rotationY && type !== 'track') newMesh.rotation.y = data.rotationY;
-        container[data.id] = {
+        let adjustedY = data.position.y;
+        if (type === 'track') {
+            adjustedY = data.position.y + 0.06; // Lekko nad ziemią
+        } else if (type === 'mine') {
+             adjustedY = data.position.y + 0.25; // Lekko nad ziemią
+        }
+        newMesh.position.set(data.position.x, adjustedY, data.position.z);
+        if (data.rotationY && type !== 'track') newMesh.rotation.y = data.rotationY;
+        container[data.id] = { 
             mesh: newMesh,
             lifespan: data.lifespan,
             initialLifespan: data.lifespan,
@@ -876,19 +963,22 @@ function drawMinimap() {
         const bPos = buildingData.position; const bDim = buildingData.dimensions; const halfW = bDim.x / 2; const halfD = bDim.z / 2;
         const corners = [ { x: bPos.x - halfW, z: bPos.z - halfD }, { x: bPos.x + halfW, z: bPos.z - halfD }, { x: bPos.x + halfW, z: bPos.z + halfD }, { x: bPos.x - halfW, z: bPos.z + halfD }, ];
         const transformedCorners = corners.map(c => transformPoint(c.x, c.z));
-        if (transformedCorners.every(c => c !== null)) { ctx.beginPath(); ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y); for(let i = 1; i < transformedCorners.length; i++) { ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y); } ctx.closePath(); ctx.fill(); }
+        if (transformedCorners.every(c => c.x !== undefined)) { ctx.beginPath(); ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y); for(let i = 1; i < transformedCorners.length; i++) { ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y); } ctx.closePath(); ctx.fill(); }
     }
     const crateBlink = Math.sin(currentTime * 0.005) * 0.4 + 0.6; ctx.fillStyle = `rgba(255, 223, 0, ${crateBlink})`; ctx.strokeStyle = `rgba(255, 223, 0, ${crateBlink + 0.2})`; ctx.lineWidth = 2;
-    for (const id in clientGameState.crates) { const crate = clientGameState.crates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
+    for (const id in clientGameState.crates) { const crate = clientGameState.crates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed && transformed.x !== undefined) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
     ctx.fillStyle = `rgba(100, 200, 100, ${crateBlink})`; ctx.strokeStyle = `rgba(100, 200, 100, ${crateBlink + 0.2})`;
-    for (const id in clientGameState.ammoCrates) { const crate = clientGameState.ammoCrates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
+    for (const id in clientGameState.ammoCrates) { const crate = clientGameState.ammoCrates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed && transformed.x !== undefined) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
     ctx.fillStyle = '#ff1a1a';
     for (const id in clientGameState.players) {
         if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
         const player = clientGameState.players[id]; const transformed = transformPoint(player.position.x, player.position.z);
-        if (transformed) { ctx.beginPath(); ctx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2); ctx.fill(); }
+        if (transformed && transformed.x !== undefined) { ctx.beginPath(); ctx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2); ctx.fill(); }
     }
-    const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius); sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)'); sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)'); sweepGradient.addColorStop(1, 'rgba(128, 255, 128, 0)');
+    const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius); 
+    sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)'); 
+    sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)'); 
+    sweepGradient.addColorStop(1, 'rgba(128, 255, 128, 0)'); 
     ctx.beginPath(); ctx.moveTo(centerX, centerY); ctx.arc(centerX, centerY, radius, minimapScanAngle, minimapScanAngle + Math.PI * 0.3); ctx.closePath(); ctx.fillStyle = sweepGradient; ctx.fill(); ctx.restore(); 
     ctx.save(); ctx.translate(centerX, centerY); ctx.fillStyle = '#66ff66'; ctx.shadowColor = '#66ff66'; ctx.shadowBlur = 10;
     ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-6, 8); ctx.lineTo(6, 8); ctx.closePath(); ctx.fill(); ctx.restore();
@@ -997,7 +1087,7 @@ function animate() {
                         const intersects = raycaster.intersectObjects(aimables, true);
                         const endPoint = intersects.length > 0 ? intersects[0].point : raycaster.ray.at(10000, sniperLaserEndPoint);
                         const startPoint = new THREE.Vector3();
-                        localPlayerMesh.barrelTip.getWorldPosition(startPoint);
+                        localPlayerMesh.barrel.getWorldPosition(startPoint); // Use barrel position for laser origin
                         positions[0] = startPoint.x; positions[1] = startPoint.y; positions[2] = startPoint.z;
                         positions[3] = endPoint.x; positions[4] = endPoint.y; positions[5] = endPoint.z;
                     } else {
@@ -1074,16 +1164,39 @@ function animate() {
 
     const gravity = -9.8;
     for (let i = gameObjects.particles.length - 1; i >= 0; i--) {
-        const p = gameObjects.particles[i]; p.lifespan -= delta;
-        if (p.lifespan <= 0) { scene.remove(p.mesh || p); if(p.geometry) p.geometry.dispose(); if(p.material) p.material.dispose(); gameObjects.particles.splice(i, 1); } 
-        else { 
-            if (p.isFlash) {
+        const p = gameObjects.particles[i]; 
+        p.lifespan -= delta;
+
+        if (p.lifespan <= 0) { 
+            scene.remove(p.mesh); 
+            if(p.mesh.geometry) p.mesh.geometry.dispose(); 
+            if(p.mesh.material) {
+                // Obsługa zarówno pojedynczego materiału, jak i tablicy materiałów
+                if (Array.isArray(p.mesh.material)) {
+                    p.mesh.material.forEach(mat => {
+                        if(mat.map) mat.map.dispose();
+                        mat.dispose();
+                    });
+                } else {
+                    if(p.mesh.material.map) p.mesh.material.map.dispose();
+                    p.mesh.material.dispose();
+                }
+            }
+            gameObjects.particles.splice(i, 1); 
+        } else { 
+            if (p.isFlash) { // p.mesh musi być THREE.Sprite tutaj
                 const scale = p.mesh.scale.x * (1 - delta * 8);
                 p.mesh.scale.set(scale, scale, scale);
                 p.mesh.material.opacity = p.lifespan / 0.15;
             }
-            if (p.velocity) { p.velocity.y += gravity * delta; p.position.add(p.velocity.clone().multiplyScalar(delta)); }
-            if (p.target) { p.mesh.position.copy(p.target.position); if (!clientGameState.players[p.target.id] || !clientGameState.players[p.target.id].isEmpDisabled) p.lifespan = 0; }
+            if (p.velocity) { 
+                p.velocity.y += gravity * delta; 
+                p.mesh.position.add(p.velocity.clone().multiplyScalar(delta)); 
+            }
+            if (p.target) { // p.mesh tutaj to THREE.Mesh dla efektów EMP
+                p.mesh.position.copy(p.target.position); 
+                if (!clientGameState.players[p.target.id] || !clientGameState.players[p.target.id].isEmpDisabled) p.lifespan = 0; 
+            }
         }
     }
     
@@ -1179,7 +1292,7 @@ function animate() {
         if (isSniperModeActive && localPlayerState && !localPlayerState.isDestroyed && !localPlayerState.isSinking) {
             const tankData = TANKS_DATA[localPlayerState.tankType];
             const cameraOffsetY = tankData.sniperCamYOffset || 1.5;
-            localPlayerMesh.barrelTip.getWorldPosition(sniperCameraPosition);
+            localPlayerMesh.barrel.getWorldPosition(sniperCameraPosition); // Use barrel position as a base for sniper cam
             const sniperViewPosition = sniperCameraPosition.clone();
             sniperViewPosition.y += cameraOffsetY;
             const mantletPosition = new THREE.Vector3();
@@ -1220,13 +1333,21 @@ socket.on('serverStatus', (data) => {
     } else { console.log("Serwer oczekuje na konfigurację."); }
     if (data.devMode) {
         console.log("Tryb deweloperski AKTYWNY. Odblokowywanie zawartości premium.");
-        const abramsCard = document.getElementById('select-abrams');
-        const abramsButton = abramsCard.querySelector('button');
-        const premiumLabel = abramsCard.querySelector('.premium-label');
-        abramsCard.classList.remove('locked');
-        abramsButton.disabled = false;
-        abramsButton.textContent = 'Wybierz i Walcz';
-        if (premiumLabel) premiumLabel.style.display = 'none';
+        // Iteruj przez wszystkie czołgi, aby odblokować te premium
+        Object.keys(TANKS_DATA).forEach(tankKey => {
+            const tank = TANKS_DATA[tankKey];
+            if (tank.isPremium) {
+                const tankCard = document.getElementById(`select-${tankKey}`);
+                const tankButton = tankCard?.querySelector('button');
+                const premiumLabel = tankCard?.querySelector('.premium-label');
+                if (tankCard) tankCard.classList.remove('locked');
+                if (tankButton) {
+                    tankButton.disabled = false;
+                    tankButton.textContent = 'Wybierz i Walcz';
+                }
+                if (premiumLabel) premiumLabel.style.display = 'none';
+            }
+        });
     }
 });
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });

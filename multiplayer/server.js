@@ -50,9 +50,30 @@ const TREE_COLLISION_RADIUS = 1.5;
 const LARGE_ROCK_COUNT = 30;
 
 const TANKS_DATA = {
-  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0 },
-  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3, hullWidth: 6.5 },
-  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25, hullWidth: 5.5 },
+  // Istniejące czołgi (standard to teraz M4 Sherman)
+  pl01: { name: "PL-01 Concept (Polska)", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0 },
+  abrams: { name: "M1 Abrams (USA)", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3, hullWidth: 6.5 },
+  standard: { name: "M4 Sherman (USA)", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25, hullWidth: 5.5 },
+  
+  // Nowe czołgi
+  tigerI: { name: "Tiger I (Niemcy)", stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, startY: 1.5, hullWidth: 7.0 },
+  t3485: { name: "T-34-85 (ZSRR)", stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, startY: 1.1, hullWidth: 5.0 },
+  cromwell: { name: "Cromwell (Wielka Brytania)", stats: { hp: 90, damage: 0.9, speed: 20, turretRot: 1.9 }, startY: 1.0, hullWidth: 4.8 },
+  amx1375: { name: "AMX 13 75 (Francja)", stats: { hp: 80, damage: 0.95, speed: 22, turretRot: 2.0 }, startY: 0.8, hullWidth: 4.0 },
+  type59: { name: "Type 59 (Chiny)", stats: { hp: 110, damage: 1.1, speed: 14, turretRot: 1.3 }, startY: 1.2, hullWidth: 5.8 },
+  chiha: { name: "Chi-Ha (Japonia)", stats: { hp: 70, damage: 0.8, speed: 12, turretRot: 1.4 }, startY: 0.9, hullWidth: 4.5 },
+  strv103b: { name: "Strv 103B (Szwecja)", stats: { hp: 120, damage: 1.3, speed: 17, turretRot: 0.0 }, startY: 0.8, hullWidth: 6.0 }, // Strv 103B bez obrotu wieży
+  p40: { name: "P40 (Włochy)", stats: { hp: 95, damage: 0.9, speed: 13, turretRot: 1.4 }, startY: 1.1, hullWidth: 5.2 },
+  skodaT25: { name: "Škoda T 25 (Czechosłowacja)", stats: { hp: 90, damage: 1.0, speed: 18, turretRot: 1.7 }, startY: 1.1, hullWidth: 4.8 },
+  ramII: { name: "Ram II (Kanada)", stats: { hp: 100, damage: 0.95, speed: 14, turretRot: 1.5 }, startY: 1.3, hullWidth: 5.6 },
+  sentinelAC1: { name: "Sentinel AC 1 (Australia)", stats: { hp: 100, damage: 0.98, speed: 13, turretRot: 1.4 }, startY: 1.2, hullWidth: 5.3 },
+  turanIII: { name: "Turán III (Węgry)", stats: { hp: 88, damage: 0.85, speed: 11, turretRot: 1.3 }, startY: 1.0, hullWidth: 5.0 },
+  bt42: { name: "BT-42 (Finlandia)", stats: { hp: 80, damage: 1.1, speed: 20, turretRot: 1.5 }, startY: 0.9, hullWidth: 4.2 },
+  shotkaldalet: { name: "Shot Kal Dalet (Izrael)", stats: { hp: 125, damage: 1.15, speed: 12, turretRot: 1.1 }, startY: 1.3, hullWidth: 6.0 },
+  nahueldl43: { name: "Nahuel DL 43 (Argentyna)", stats: { hp: 98, damage: 1.0, speed: 14, turretRot: 1.4 }, startY: 1.2, hullWidth: 5.5 },
+  chonmaho: { name: "Ch'ŏnma-ho (Korea Północna)", stats: { hp: 115, damage: 1.1, speed: 15, turretRot: 1.3 }, startY: 1.1, hullWidth: 6.0 },
+  k2blackpanther: { name: "K2 Black Panther (Korea Południowa)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, startY: 1.5, hullWidth: 6.8 },
+  rooikat: { name: "Rooikat (RPA)", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, startY: 0.8, hullWidth: 3.5 }, // Rooikat to pojazd kołowy, niski Y
 };
 
 const WEAPONS_DATA = {
@@ -462,11 +483,20 @@ function gameLoop() {
 
         const distSq = (player.position.x - player.lastTrackPos.x)**2 + (player.position.z - player.lastTrackPos.z)**2;
         if (distSq > TRACK_DISTANCE_THRESHOLD**2) {
-            const trackWidth = tankData.hullWidth / 2 - 0.5;
+            const tankWidth = TANKS_DATA[player.tankType].hullWidth; // Użyj szerokości kadłuba z TANKS_DATA
+            const trackOffset = tankWidth / 2 - 0.5; // Offset od centrum czołgu do gąsienicy
             const cosR = Math.cos(player.rotation.y);
             const sinR = Math.sin(player.rotation.y);
-            const rightTrackPos = { x: player.position.x + cosR * trackWidth, z: player.position.z - sinR * trackWidth };
-            const leftTrackPos = { x: player.position.x - cosR * trackWidth, z: player.position.z + sinR * trackWidth };
+
+            const rightTrackPos = { 
+                x: player.position.x + cosR * trackOffset, 
+                z: player.position.z - sinR * trackOffset 
+            };
+            const leftTrackPos = { 
+                x: player.position.x - cosR * trackOffset, 
+                z: player.position.z + sinR * trackOffset 
+            };
+            
             [leftTrackPos, rightTrackPos].forEach(pos => {
                 const trackId = `track_${nextObjectId++}`;
                 const track = {
@@ -757,7 +787,7 @@ function checkProjectileBuildingCollision(projectile, buildings) {
         const { position: bPos, dimensions: bDim } = building;
         if (projectile.position.x < bPos.x - bDim.x / 2 || projectile.position.x > bPos.x + bDim.x / 2 || projectile.position.z < bPos.z - bDim.z / 2 || projectile.position.z > bPos.z + bDim.z / 2) continue;
         let minBuildingHeight = Infinity;
-        const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }];
+        const corners = [ { x: bPos.x - bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z - bDim.z/2 }, { x: bPos.x - bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x + bDim.x/2, z: bPos.z + bDim.z/2 }, { x: bPos.x, z: bPos.z } ];
         corners.forEach(c => { const h = getHeightAt(c.x, c.z); if(h < minBuildingHeight) minBuildingHeight = h; });
         if (projectile.position.y < minBuildingHeight || projectile.position.y > minBuildingHeight + bDim.y) continue;
         if (projectile.weaponId === 'he' || projectile.weaponId === 'heat' || projectile.weaponId === 'guided') {

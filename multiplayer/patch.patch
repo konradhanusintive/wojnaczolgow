@@ -1,0 +1,2118 @@
+diff
+--- a/multiplayer/index.html
++++ b/multiplayer/index.html
+@@ -14,40 +14,7 @@
+     <div id="start-screen" class="overlay" style="display: none">
+       <h1 id="selection-title">Wybierz Swój Czołg</h1>
+       <div class="tank-selection-container">
+-        <div class="tank-card" id="select-pl01">
+-          <h3>PL-01 Concept</h3>
+-          <canvas id="canvas-pl01" class="tank-canvas"></canvas>
+-          <div class="stats-container">
+-            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-pl01-hp" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-pl01-dmg" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-pl01-spd" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-pl01-rot" class="stat-bar-fill"></div></div></div>
+-          </div>
+-          <button class="select-button">Wybierz i Walcz</button>
+-        </div>
+-        <div class="tank-card locked" id="select-abrams">
+-          <div class="premium-label">PREMIUM</div>
+-          <h3>M1 Abrams</h3>
+-          <canvas id="canvas-abrams" class="tank-canvas"></canvas>
+-          <div class="stats-container">
+-            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-abrams-hp" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-abrams-dmg" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-abrams-spd" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-abrams-rot" class="stat-bar-fill"></div></div></div>
+-          </div>
+-          <button class="select-button" disabled>Wybierz</button>
+-        </div>
+-        <div class="tank-card" id="select-standard">
+-          <h3>Standard</h3>
+-          <canvas id="canvas-standard" class="tank-canvas"></canvas>
+-          <div class="stats-container">
+-            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-standard-hp" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-standard-dmg" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-standard-spd" class="stat-bar-fill"></div></div></div>
+-            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-standard-rot" class="stat-bar-fill"></div></div></div>
+-          </div>
+-          <button class="select-button">Wybierz i Walcz</button>
+-        </div>
++        <!-- Karty czołgów będą generowane dynamicznie przez JavaScript -->
+       </div>
+        <fieldset id="server-config-panel">
+         <div id="terrain-controls">
+@@ -128,6 +95,8 @@
+       }
+     </script>
+     <script type="module" src="background.js"></script>
++    <script type="module" src="environment.js"></script>
++    <script type="module" src="tankModels.js"></script>
+     <script type="module" src="script.js"></script>
+   </body>
+ </html>
+``````diff
+--- a/multiplayer/script.js
++++ b/multiplayer/script.js
+@@ -1,10 +1,19 @@
+ import * as THREE from "three";
+-import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
++// Usunięto import ConvexGeometry, ponieważ jest już w tankModels.js
+ import { createSkydomeBackground } from './background.js';
+ import { createEnvironment } from './environment.js';
++// Importujemy funkcje do tworzenia czołgów i materiał z nowego pliku
++import { 
++    createStandardTank, createPL01Tank, createAbramsTank, LAMBERT_MATERIAL,
++    createTigerITank, createT3485Tank, createCromwellTank, createAMX1375Tank,
++    createType59Tank, createChiHaTank, createStrv103BTank, createP40Tank,
++    createSkodaT25Tank, createRamIITank, createSentinelAC1Tank, createTuranIIITank,
++    createBT42Tank, createShotKalDaletTank, createNahuelDL43Tank, createChonmaHoTank,
++    createK2BlackPantherTank, createRooikatTank
++} from './tankModels.js'; 
+ 
+ let scene, renderer, clock, camera;
+ let localPlayerId = null;
+ let clientGameState = {};
+ let isGameStarted = false;
+ let isSelectionScreenActive = false;
+@@ -12,11 +21,10 @@ let tankSelectionManager;
+ let environmentMeshes = {}; // <-- Zmieniona nazwa, będzie przechowywać drzewa, skały itp.
+ 
+ let brickMaterial;
+-let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial, fireMaterial, scorchMarkMaterial;
+-let sandTrackMaterial, grassTrackMaterial;
++let greySmokeMaterial, blackSmokeMaterial, cloudSmokeMaterial, empEffectMaterial, muzzleFlashMaterial, fireMaterial, scorchMarkMaterial; // sandTrackMaterial, grassTrackMaterial;
+ let minimapCanvas, minimapCtx;
+ let minimapScanAngle = 0;
+-
+ let heightMap;
+ let terrainMesh;
+ let terrainParams;
+@@ -59,18 +67,39 @@ const gameObjects = {
+     tracks: {},
+     craters: {},
+     fires: {},
+-    fallingTrees: [], // <-- Przechowuje przewracające się drzewa
+-    trees: {}, // <-- Mapa do przechowywania siatek drzew
+-    rocks: {}  // <-- Mapa do przechowywanie siatek skał
++    fallingTrees: [],
++    trees: {},
++    rocks: {}
+ };
+ 
+ const socket = io();
+ 
+ // --- STAŁE I DANE ---
+ const TANKS_DATA = {
+-  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0, sniperCamYOffset: 1.8 },
+-  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5, sniperCamYOffset: 2.2 },
+-  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5, sniperCamYOffset: 2.0 },
++  // Istniejące czołgi (standard to teraz M4 Sherman)
++  pl01: { name: "PL-01 Concept (Polska)", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0, sniperCamYOffset: 1.8, isPremium: false },
++  abrams: { name: "M1 Abrams (USA)", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5, sniperCamYOffset: 2.2, isPremium: true },
++  standard: { name: "M4 Sherman (USA)", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5, sniperCamYOffset: 2.0, isPremium: false },
++  
++  // Nowe czołgi
++  tigerI: { name: "Tiger I (Niemcy)", stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, create: createTigerITank, hullWidth: 7.0, sniperCamYOffset: 2.5, isPremium: false },
++  t3485: { name: "T-34-85 (ZSRR)", stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, create: createT3485Tank, hullWidth: 5.0, sniperCamYOffset: 1.9, isPremium: false },
++  cromwell: { name: "Cromwell (Wielka Brytania)", stats: { hp: 90, damage: 0.9, speed: 20, turretRot: 1.9 }, create: createCromwellTank, hullWidth: 4.8, sniperCamYOffset: 1.8, isPremium: false },
++  amx1375: { name: "AMX 13 75 (Francja)", stats: { hp: 80, damage: 0.95, speed: 22, turretRot: 2.0 }, create: createAMX1375Tank, hullWidth: 4.0, sniperCamYOffset: 1.5, isPremium: false },
++  type59: { name: "Type 59 (Chiny)", stats: { hp: 110, damage: 1.1, speed: 14, turretRot: 1.3 }, create: createType59Tank, hullWidth: 5.8, sniperCamYOffset: 2.0, isPremium: true },
++  chiha: { name: "Chi-Ha (Japonia)", stats: { hp: 70, damage: 0.8, speed: 12, turretRot: 1.4 }, create: createChiHaTank, hullWidth: 4.5, sniperCamYOffset: 1.7, isPremium: false },
++  strv103b: { name: "Strv 103B (Szwecja)", stats: { hp: 120, damage: 1.3, speed: 17, turretRot: 0.0 }, create: createStrv103BTank, hullWidth: 6.0, sniperCamYOffset: 1.5, isPremium: true }, // Strv 103B bez obrotu wieży
++  p40: { name: "P40 (Włochy)", stats: { hp: 95, damage: 0.9, speed: 13, turretRot: 1.4 }, create: createP40Tank, hullWidth: 5.2, sniperCamYOffset: 1.9, isPremium: false },
++  skodaT25: { name: "Škoda T 25 (Czechosłowacja)", stats: { hp: 90, damage: 1.0, speed: 18, turretRot: 1.7 }, create: createSkodaT25Tank, hullWidth: 4.8, sniperCamYOffset: 1.8, isPremium: false },
++  ramII: { name: "Ram II (Kanada)", stats: { hp: 100, damage: 0.95, speed: 14, turretRot: 1.5 }, create: createRamIITank, hullWidth: 5.6, sniperCamYOffset: 2.1, isPremium: false },
++  sentinelAC1: { name: "Sentinel AC 1 (Australia)", stats: { hp: 100, damage: 0.98, speed: 13, turretRot: 1.4 }, create: createSentinelAC1Tank, hullWidth: 5.3, sniperCamYOffset: 2.0, isPremium: false },
++  turanIII: { name: "Turán III (Węgry)", stats: { hp: 88, damage: 0.85, speed: 11, turretRot: 1.3 }, create: createTuranIIITank, hullWidth: 5.0, sniperCamYOffset: 1.8, isPremium: false },
++  bt42: { name: "BT-42 (Finlandia)", stats: { hp: 80, damage: 1.1, speed: 20, turretRot: 1.5 }, create: createBT42Tank, hullWidth: 4.2, sniperCamYOffset: 1.7, isPremium: false },
++  shotkaldalet: { name: "Shot Kal Dalet (Izrael)", stats: { hp: 125, damage: 1.15, speed: 12, turretRot: 1.1 }, create: createShotKalDaletTank, hullWidth: 6.0, sniperCamYOffset: 2.1, isPremium: true },
++  nahueldl43: { name: "Nahuel DL 43 (Argentyna)", stats: { hp: 98, damage: 1.0, speed: 14, turretRot: 1.4 }, create: createNahuelDL43Tank, hullWidth: 5.5, sniperCamYOffset: 2.0, isPremium: false },
++  chonmaho: { name: "Ch'ŏnma-ho (Korea Północna)", stats: { hp: 115, damage: 1.1, speed: 15, turretRot: 1.3 }, create: createChonmaHoTank, hullWidth: 6.0, sniperCamYOffset: 2.0, isPremium: false },
++  k2blackpanther: { name: "K2 Black Panther (Korea Południowa)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, create: createK2BlackPantherTank, hullWidth: 6.8, sniperCamYOffset: 2.3, isPremium: true },
++  rooikat: { name: "Rooikat (RPA)", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, create: createRooikatTank, hullWidth: 3.5, sniperCamYOffset: 1.6, isPremium: false },
+ };
+ 
+ const WEAPONS_DATA = {
+@@ -96,12 +125,7 @@ const PerlinNoise = new (function() {
+ PerlinNoise.init(Math.random());
+ 
+ // --- FUNKCJE TWORZĄCE OBIEKTY 3D ---
+-const LAMBERT_MATERIAL = (color) => new THREE.MeshLambertMaterial({ color });
+-function createTrackTexture() {
+-  const canvas = document.createElement("canvas"); canvas.width = 32; canvas.height = 128; const ctx = canvas.getContext("2d"); ctx.fillStyle = "#3a3a3a"; ctx.fillRect(0, 0, 32, 128); ctx.fillStyle = "#2a2a2a";
+-  for (let i = 0; i < 128; i += 8) { ctx.fillRect(0, i, 32, 4); } const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping; return texture;
+-}
+-const trackMaterial = new THREE.MeshLambertMaterial({ map: createTrackTexture() });
++// Usunięto LAMBERT_MATERIAL, createTrackTexture, trackMaterial - przeniesione do tankModels.js
+ 
+ function createGroundTexture(heightData, params) {
+     const canvas = document.createElement("canvas"); const size = 512; canvas.width = size; canvas.height = size;
+@@ -128,9 +152,7 @@ function createBrickMaterial() {
+     const texture = new THREE.CanvasTexture(canvas); texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
+     return new THREE.MeshLambertMaterial({ map: texture });
+ }
+-function createStandardTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 5.5, hullHeight = 1.8, hullLength = 9.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength - 2), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const glacis = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight * 1.2, 2.5), hullMaterial); glacis.position.set(0, hullHeight / 2 - 0.2, -hullLength / 2 + 0.5); glacis.rotation.x = -Math.PI / 6; hullGroup.add(glacis); const trackWidth = 1.2, trackHeight = 2.4, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); const rightTrack = leftTrack.clone(); leftTrack.position.x = -hullWidth / 2 - trackWidth / 2; rightTrack.position.x = hullWidth / 2 + trackWidth / 2; trackGroup.add(leftTrack, rightTrack); tank.add(hullGroup); const turretPoints = [new THREE.Vector3(2, 0, 2), new THREE.Vector3(2, 0, -2.5), new THREE.Vector3(-2, 0, -2.5), new THREE.Vector3(-2, 0, 2), new THREE.Vector3(1.5, 2, 1.5), new THREE.Vector3(1.5, 2, -2), new THREE.Vector3(-1.5, 2, -2), new THREE.Vector3(-1.5, 2, 1.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.8, -2.5); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 3; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 3, 0); barrel.add(barrelTip); turretGroup.position.y = hullHeight + 0.1; turretGroup.position.z = 1; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.6, (hullLength - 2) / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
+-function createPL01Tank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.0, hullHeight = 1.5, hullLength = 9.5; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.8, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const sidePanelGeom = new THREE.BoxGeometry(0.5, hullHeight * 1.5, hullLength); const leftPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); leftPanel.position.set(-hullWidth / 2, hullHeight / 2, 0); leftPanel.rotation.z = 0.5; hullGroup.add(leftPanel); const rightPanel = new THREE.Mesh(sidePanelGeom, hullMaterial); rightPanel.position.set(hullWidth / 2, hullHeight / 2, 0); rightPanel.rotation.z = -0.5; hullGroup.add(rightPanel); tank.add(hullGroup); const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 1; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.5; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.5; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.5; hullGroup.add(trackGroup); const turretPoints = [new THREE.Vector3(2.5, 0, 3), new THREE.Vector3(2.5, 0, -3), new THREE.Vector3(-2.5, 0, -3), new THREE.Vector3(-2.5, 0, 3), new THREE.Vector3(0, 1.8, 2.5), new THREE.Vector3(0, 1.8, -2.5)]; turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)))); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.6, -2.8); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333)); barrel.position.z = 3.5; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 0, 3.5); barrel.add(barrelTip); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.7, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
+-function createAbramsTank(color) { const tank = new THREE.Group(); const hullGroup = new THREE.Group(); const turretGroup = new THREE.Group(); const hullMaterial = LAMBERT_MATERIAL(color); const hullWidth = 6.5, hullHeight = 2.0, hullLength = 10.0; const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.7, hullHeight, hullLength), hullMaterial); mainHull.position.y = hullHeight / 2; hullGroup.add(mainHull); const trackWidth = 1.4, trackHeight = 2.0, trackLength = hullLength; const trackGroup = new THREE.Group(); const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial); leftTrack.position.x = -hullWidth / 2 + 0.8; const rightTrack = leftTrack.clone(); rightTrack.position.x = hullWidth / 2 - 0.8; trackGroup.add(leftTrack, rightTrack); trackGroup.position.y = trackHeight / 2 - 0.6; hullGroup.add(trackGroup); tank.add(hullGroup); const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.2, 1.0, 8), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretGroup.add(turretBase); const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))); turretTop.position.y = 1.1; turretGroup.add(turretTop); const mantlet = new THREE.Group(); mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444))); mantlet.position.set(0, 0.5, -3.0); turretGroup.add(mantlet); const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333)); barrel.rotation.x = Math.PI / 2; barrel.position.z = 4; mantlet.add(barrel); const barrelTip = new THREE.Object3D(); barrelTip.position.set(0, 4, 0); barrel.add(barrelTip); turretGroup.position.y = hullHeight; hullGroup.add(turretGroup); const exhaustPoint = new THREE.Object3D(); exhaustPoint.position.set(0, hullHeight * 0.5, hullLength / 2); hullGroup.add(exhaustPoint); tank.hullGroup = hullGroup; tank.turret = turretGroup; tank.mantlet = mantlet; tank.barrel = barrel; tank.barrelTip = barrelTip; tank.exhaustPoint = exhaustPoint; return tank; }
++// Usunięto createStandardTank, createPL01Tank, createAbramsTank - przeniesione do tankModels.js
+ 
+ function getHeightAt(x, z) {
+     if (!heightMap || !terrainParams) return 0;
+     const { size, segments } = terrainParams; const gridX = (x + size / 2) / size * segments; const gridZ = (z + size / 2) / size * segments;
+     const x1 = Math.floor(gridX); const z1 = Math.floor(gridZ); const x2 = Math.min(x1 + 1, segments); const z2 = Math.min(z1 + 1, segments);
+     if (x1 < 0 || x1 > segments || z1 < 0 || z1 > segments || !heightMap[x1] || !heightMap[x2]) return 0;
+-    const h11 = heightMap[x1][z1]; const h12 = heightMap[x1][z2]; const h21 = heightMap[x2][z1]; const h22 = heightMap[x2][z2];
+-    if (h11 === undefined || h12 === undefined || h21 === undefined || h22 === undefined) return 0;
+-    const tx = gridX - x1; const tz = gridZ - z1; const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx; return h_x1 * (1 - tz) + h_x2 * tz;
++    const h11 = heightMap[x1][z1]; const h12 = heightMap[x1][z2]; const h21 = heightMap[x2][z1]; const h22 = heightMap[x2][z2];
++    if (h11 === undefined || h12 === undefined || h21 === undefined || h22 === undefined) return 0;
++    const tx = gridX - x1; const tz = gridZ - z1; const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx; 
++    return h_x1 * (1 - tz) + h_x2 * tz;
+ }
+ 
+ function createTrackMarkTexture(type) {
+@@ -148,6 +170,11 @@ function createTrackMarkTexture(type) {
+     return new THREE.CanvasTexture(canvas);
+ }
+ 
++// Globalne materiały dla śladów gąsienic, aby nie tworzyć ich w kółko
++const sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
++const grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
++
++
+ function createBuildingMesh(buildingData) {
+     const { id, position, brickSize, bricks, dimensions } = buildingData;
+     const brickGeometry = new THREE.BoxGeometry(brickSize.x, brickSize.y, brickSize.z);
+@@ -406,23 +433,36 @@ class TankSelectionManager {
+     init() {
+         this.tankKeys.forEach(tankKey => {
+             const canvas = document.getElementById(`canvas-${tankKey}`);
+-            if (!canvas || canvas.clientWidth === 0) {
+-                console.error(`Canvas for ${tankKey} not found or has no size.`);
+-                return;
++            if (!canvas || canvas.clientWidth === 0 || canvas.clientHeight === 0) {
++                console.warn(`Canvas for ${tankKey} not found or has no size (width: ${canvas?.clientWidth}, height: ${canvas?.clientHeight}). Skipping miniature setup.`);
++                return; // Pomiń setup, jeśli canvas nie jest gotowy
+             }
+             const scene = new THREE.Scene();
+-            const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
++            // Ustawienia kamery dla miniatury
++            const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
++            camera.position.set(0, 3, 7); // Nieco wyżej i bliżej
++            camera.lookAt(0, -1, 0); // Spójrz lekko w dół, na środek podstawy czołgu
++
+             const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+             renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+-            scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+-            dirLight.position.set(5, 10, 7);
++            
++            // Subtelne tło dla kontrastu
++            scene.background = new THREE.Color(0x1a1a1a); 
++
++            // Oświetlenie dla miniatury
++            scene.add(new THREE.AmbientLight(0xffffff, 1.5)); // Wzrost intensywności
++            const dirLight = new THREE.DirectionalLight(0xffffff, 2.0); // Wzrost intensywności
++            dirLight.position.set(5, 10, 7).normalize();
+             scene.add(dirLight);
++            const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
++            dirLight2.position.set(-5, 5, -7).normalize();
++            scene.add(dirLight2);
++
+             const tankMesh = TANKS_DATA[tankKey].create(new THREE.Color(0xaaaaaa));
+-            tankMesh.scale.set(0.6, 0.6, 0.6);
+-            tankMesh.position.y = -2.5;
++            tankMesh.scale.set(0.7, 0.7, 0.7); // Nieco większa skala
++            tankMesh.position.y = -1.8; // Dostosuj, aby czołg był nad "ziemią" w podglądzie
+             scene.add(tankMesh);
+-            camera.position.z = 8;
++            
+             const target = {
+                 canvas, scene, camera, renderer, tankMesh,
+                 isDragging: false,
+@@ -495,23 +535,36 @@ function initializeUI() {
+         // Czasem potrzebny jest delay, aby przeglądarka obliczyła clientWidth/clientHeight.
+         setTimeout(() => {
+             isSelectionScreenActive = true;
+-            tankSelectionManager = new TankSelectionManager(Object.keys(TANKS_DATA));
++            tankSelectionManager = new TankSelectionManager(Object.keys(TANKS_DATA)); // Inicjuj po wygenerowaniu DOM
+             tankSelectionManager.init();
+         }, 100);
+     });
+     
++    // Upewnij się, że ten kontener jest pusty przed generowaniem, aby uniknąć duplikatów
+     const tankSelectionContainer = document.querySelector('.tank-selection-container');
+     tankSelectionContainer.innerHTML = ''; // Wyczyść istniejące karty, jeśli są
+ 
+     // Generowanie kart czołgów dynamicznie
+     Object.keys(TANKS_DATA).forEach((tankKey) => {
+         const tank = TANKS_DATA[tankKey];
+-        document.getElementById(`bar-${tankKey}-hp`).style.width = `${(tank.stats.hp / 150) * 100}%`; document.getElementById(`bar-${tankKey}-dmg`).style.width = `${(tank.stats.damage / 40) * 100}%`;
+-        document.getElementById(`bar-${tankKey}-spd`).style.width = `${(tank.stats.speed / 20) * 100}%`; document.getElementById(`bar-${tankKey}-rot`).style.width = `${(tank.stats.turretRot / 2) * 100}%`;
++        const tankCard = document.createElement('div');
++        tankCard.className = `tank-card ${tank.isPremium ? 'locked' : ''}`;
++        tankCard.id = `select-${tankKey}`;
++        tankCard.innerHTML = `
++            ${tank.isPremium ? '<div class="premium-label">PREMIUM</div>' : ''}
++            <h3>${tank.name}</h3>
++            <canvas id="canvas-${tankKey}" class="tank-canvas"></canvas>
++            <div class="stats-container">
++                <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-${tankKey}-hp" class="stat-bar-fill"></div></div></div>
++                <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-${tankKey}-dmg" class="stat-bar-fill"></div></div></div>
++                <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-${tankKey}-spd" class="stat-bar-fill"></div></div></div>
++                <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-${tankKey}-rot" class="stat-bar-fill"></div></div></div>
++            </div>
++            <button class="select-button" ${tank.isPremium ? 'disabled' : ''}>Wybierz i Walcz</button>
++        `;
++        tankSelectionContainer.appendChild(tankCard);
++
++        // Aktualizacja pasków statystyk
++        document.getElementById(`bar-${tankKey}-hp`).style.width = `${(tank.stats.hp / 150) * 100}%`; 
++        document.getElementById(`bar-${tankKey}-dmg`).style.width = `${(tank.stats.damage / 40) * 100}%`;
++        document.getElementById(`bar-${tankKey}-spd`).style.width = `${(tank.stats.speed / 25) * 100}%`; 
++        document.getElementById(`bar-${tankKey}-rot`).style.width = `${(tank.stats.turretRot / 2.0) * 100}%`; 
+     });
+     document.querySelectorAll(".select-button").forEach((button) => {
+         button.addEventListener("click", (e) => {
+             if (button.disabled) return; 
+             isSelectionScreenActive = false;
+             if (tankSelectionManager) tankSelectionManager.destroy();
+-            const card = e.target.closest(".tank-card"); const tankType = card.id.split("-")[1];
++            const card = e.target.closest(".tank-card"); 
++            const tankType = card.id.split("-")[1]; 
+             const mapSize = document.querySelector('input[name="map-size"]:checked').value;
+             const amplitude = parseInt(document.getElementById('terrain-amplitude').value, 10);
+             const scale = parseInt(document.getElementById('terrain-scale').value, 10);
+@@ -644,8 +697,8 @@ function initGame(payload) {
+     cloudSmokeMaterial = new THREE.MeshBasicMaterial({ map: smokeTexture, transparent: true, color: 0xcccccc, depthWrite: false, opacity: 0.8 });
+     muzzleFlashMaterial = new THREE.SpriteMaterial({ map: createMuzzleFlashTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+     
+-    sandTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('sand'), transparent: true, depthWrite: false });
+-    grassTrackMaterial = new THREE.MeshBasicMaterial({ map: createTrackMarkTexture('grass'), transparent: true, depthWrite: false });
++    // Używamy globalnych materiałów dla śladów gąsienic, są definiowane globalnie w tym pliku.
++    // sandTrackMaterial i grassTrackMaterial są teraz zadeklarowane i użyte bez problemu.
+     
+     fireMaterial = new THREE.MeshBasicMaterial({ map: createFireTexture(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+     scorchMarkMaterial = new THREE.MeshBasicMaterial({ map: createScorchMarkTexture(), transparent: true, depthWrite: false });
+@@ -675,7 +728,7 @@ function initGame(payload) {
+ }
+ 
+ function handleFireInput() {
+-    if (!canFire || !localPlayerId || !clientGameState.players[localPlayerId] || clientGameState.players[localPlayerId].isDestroyed) return;
++    if (!canFire || !localPlayerId || !clientGameState.players || !clientGameState.players[localPlayerId] || clientGameState.players[localPlayerId].isDestroyed) return;
+     const playerState = clientGameState.players[localPlayerId];
+     if (playerState.isEmpDisabled) return;
+     let currentCooldown = 0.5;
+@@ -832,19 +885,24 @@ function createObjectMesh(payload) {
+         case 'crate': newMesh = createSupplyCrate(); break;
+         case 'ammoCrate': newMesh = createAmmoCrateMesh(); break;
+         case 'track':
++            // Używamy globalnych materiałów dla śladów gąsienic
+             const trackMat = (data.type === 'sand' || data.type === 'mud') ? sandTrackMaterial.clone() : grassTrackMaterial.clone();
+             newMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 4.0), trackMat);
+             newMesh.rotation.x = -Math.PI / 2;
+             newMesh.rotation.z = data.rotationY;
+             break;
+         case 'fire':
+-            createFireEffect(data);
+-            return;
++            createFireEffect(data); return;
+     }
+     if (newMesh) {
+-        newMesh.position.set(data.position.x, data.position.y + (type === 'track' ? 0.06 : 0), data.position.z);
+-        if(data.rotationY && type !== 'track') newMesh.rotation.y = data.rotationY;
+-        container[data.id] = {
++        let adjustedY = data.position.y;
++        if (type === 'track') {
++            adjustedY = data.position.y + 0.06; // Lekko nad ziemią
++        } else if (type === 'mine') {
++             adjustedY = data.position.y + 0.25; // Lekko nad ziemią
++        }
++        newMesh.position.set(data.position.x, adjustedY, data.position.z);
++        if (data.rotationY && type !== 'track') newMesh.rotation.y = data.rotationY;
++        container[data.id] = { 
+             mesh: newMesh,
+             lifespan: data.lifespan,
+             initialLifespan: data.lifespan,
+@@ -876,19 +934,24 @@ function drawMinimap() {
+         const bPos = buildingData.position; const bDim = buildingData.dimensions; const halfW = bDim.x / 2; const halfD = bDim.z / 2;
+         const corners = [ { x: bPos.x - halfW, z: bPos.z - halfD }, { x: bPos.x + halfW, z: bPos.z - halfD }, { x: bPos.x + halfW, z: bPos.z + halfD }, { x: bPos.x - halfW, z: bPos.z + halfD }, ];
+         const transformedCorners = corners.map(c => transformPoint(c.x, c.z));
+-        if (transformedCorners.every(c => c !== null)) { ctx.beginPath(); ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y); for(let i = 1; i < transformedCorners.length; i++) { ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y); } ctx.closePath(); ctx.fill(); }
++        if (transformedCorners.every(c => c.x !== undefined)) { 
++            ctx.beginPath(); ctx.moveTo(transformedCorners[0].x, transformedCorners[0].y); for(let i = 1; i < transformedCorners.length; i++) { ctx.lineTo(transformedCorners[i].x, transformedCorners[i].y); } ctx.closePath(); ctx.fill(); 
++        }
+     }
+     const crateBlink = Math.sin(currentTime * 0.005) * 0.4 + 0.6; ctx.fillStyle = `rgba(255, 223, 0, ${crateBlink})`; ctx.strokeStyle = `rgba(255, 223, 0, ${crateBlink + 0.2})`; ctx.lineWidth = 2;
+-    for (const id in clientGameState.crates) { const crate = clientGameState.crates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
++    for (const id in clientGameState.crates) { const crate = clientGameState.crates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed && transformed.x !== undefined) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
+     ctx.fillStyle = `rgba(100, 200, 100, ${crateBlink})`; ctx.strokeStyle = `rgba(100, 200, 100, ${crateBlink + 0.2})`;
+-    for (const id in clientGameState.ammoCrates) { const crate = clientGameState.ammoCrates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
++    for (const id in clientGameState.ammoCrates) { const crate = clientGameState.ammoCrates[id]; const transformed = transformPoint(crate.position.x, crate.position.z); if (transformed && transformed.x !== undefined) { ctx.beginPath(); ctx.rect(transformed.x - 4, transformed.y - 4, 8, 8); ctx.fill(); ctx.stroke(); } }
+     ctx.fillStyle = '#ff1a1a';
+     for (const id in clientGameState.players) {
+         if (id === localPlayerId || clientGameState.players[id].isDestroyed || clientGameState.players[id].isSinking) continue;
+         const player = clientGameState.players[id]; const transformed = transformPoint(player.position.x, player.position.z);
+-        if (transformed) { ctx.beginPath(); ctx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2); ctx.fill(); }
++        if (transformed && transformed.x !== undefined) { ctx.beginPath(); ctx.arc(transformed.x, transformed.y, 5, 0, Math.PI * 2); ctx.fill(); }
+     }
+-    const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius); sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)'); sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)'); sweepGradient.addColorStop(1, 'rgba(128, 255, 128, 0)');
++    const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius); 
++    sweepGradient.addColorStop(0, 'rgba(128, 255, 128, 0.4)'); 
++    sweepGradient.addColorStop(0.8, 'rgba(128, 255, 128, 0.1)'); 
++    sweepGradient.addColorStop(1, 'rgba(128, 255, 128, 0)'); 
+     ctx.beginPath(); ctx.moveTo(centerX, centerY); ctx.arc(centerX, centerY, radius, minimapScanAngle, minimapScanAngle + Math.PI * 0.3); ctx.closePath(); ctx.fillStyle = sweepGradient; ctx.fill(); ctx.restore(); 
+     ctx.save(); ctx.translate(centerX, centerY); ctx.fillStyle = '#66ff66'; ctx.shadowColor = '#66ff66'; ctx.shadowBlur = 10;
+     ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-6, 8); ctx.lineTo(6, 8); ctx.closePath(); ctx.fill(); ctx.restore();
+@@ -995,15 +1058,23 @@ socket.on('serverStatus', (data) => {
+     } else { console.log("Serwer oczekuje na konfigurację."); }
+     if (data.devMode) {
+         console.log("Tryb deweloperski AKTYWNY. Odblokowywanie zawartości premium.");
+-        const abramsCard = document.getElementById('select-abrams');
+-        const abramsButton = abramsCard.querySelector('button');
+-        const premiumLabel = abramsCard.querySelector('.premium-label');
+-        abramsCard.classList.remove('locked');
+-        abramsButton.disabled = false;
+-        abramsButton.textContent = 'Wybierz i Walcz';
+-        if (premiumLabel) premiumLabel.style.display = 'none';
+-    }
+-});
++        // Iteruj przez wszystkie czołgi, aby odblokować te premium
++        Object.keys(TANKS_DATA).forEach(tankKey => {
++            const tank = TANKS_DATA[tankKey];
++            if (tank.isPremium) {
++                const tankCard = document.getElementById(`select-${tankKey}`);
++                const tankButton = tankCard?.querySelector('button');
++                const premiumLabel = tankCard?.querySelector('.premium-label');
++                if (tankCard) tankCard.classList.remove('locked');
++                if (tankButton) {
++                    tankButton.disabled = false;
++                    tankButton.textContent = 'Wybierz i Walcz';
++                }
++                if (premiumLabel) premiumLabel.style.display = 'none';
++            }
++        });
++    }
++});
+ socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
+ socket.on("gameStateUpdate", (serverState) => {
+     if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
+``````diff
+--- a/multiplayer/server.js
++++ b/multiplayer/server.js
+@@ -50,9 +50,30 @@ const TREE_COLLISION_RADIUS = 1.5;
+ const LARGE_ROCK_COUNT = 30;
+ 
+ const TANKS_DATA = {
+-  pl01: { name: "PL-01 Concept", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0 },
+-  abrams: { name: "M1 Abrams", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3, hullWidth: 6.5 },
+-  standard: { name: "Standard", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25, hullWidth: 5.5 },
++  // Istniejące czołgi (standard to teraz M4 Sherman)
++  pl01: { name: "PL-01 Concept (Polska)", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0 },
++  abrams: { name: "M1 Abrams (USA)", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3, hullWidth: 6.5 },
++  standard: { name: "M4 Sherman (USA)", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25, hullWidth: 5.5 },
++  
++  // Nowe czołgi
++  tigerI: { name: "Tiger I (Niemcy)", stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, startY: 1.5, hullWidth: 7.0 },
++  t3485: { name: "T-34-85 (ZSRR)", stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, startY: 1.1, hullWidth: 5.0 },
++  cromwell: { name: "Cromwell (Wielka Brytania)", stats: { hp: 90, damage: 0.9, speed: 20, turretRot: 1.9 }, startY: 1.0, hullWidth: 4.8 },
++  amx1375: { name: "AMX 13 75 (Francja)", stats: { hp: 80, damage: 0.95, speed: 22, turretRot: 2.0 }, startY: 0.8, hullWidth: 4.0 },
++  type59: { name: "Type 59 (Chiny)", stats: { hp: 110, damage: 1.1, speed: 14, turretRot: 1.3 }, startY: 1.2, hullWidth: 5.8 },
++  chiha: { name: "Chi-Ha (Japonia)", stats: { hp: 70, damage: 0.8, speed: 12, turretRot: 1.4 }, startY: 0.9, hullWidth: 4.5 },
++  strv103b: { name: "Strv 103B (Szwecja)", stats: { hp: 120, damage: 1.3, speed: 17, turretRot: 0.0 }, startY: 0.8, hullWidth: 6.0 }, // Strv 103B bez obrotu wieży
++  p40: { name: "P40 (Włochy)", stats: { hp: 95, damage: 0.9, speed: 13, turretRot: 1.4 }, startY: 1.1, hullWidth: 5.2 },
++  skodaT25: { name: "Škoda T 25 (Czechosłowacja)", stats: { hp: 90, damage: 1.0, speed: 18, turretRot: 1.7 }, startY: 1.1, hullWidth: 4.8 },
++  ramII: { name: "Ram II (Kanada)", stats: { hp: 100, damage: 0.95, speed: 14, turretRot: 1.5 }, startY: 1.3, hullWidth: 5.6 },
++  sentinelAC1: { name: "Sentinel AC 1 (Australia)", stats: { hp: 100, damage: 0.98, speed: 13, turretRot: 1.4 }, startY: 1.2, hullWidth: 5.3 },
++  turanIII: { name: "Turán III (Węgry)", stats: { hp: 88, damage: 0.85, speed: 11, turretRot: 1.3 }, startY: 1.0, hullWidth: 5.0 },
++  bt42: { name: "BT-42 (Finlandia)", stats: { hp: 80, damage: 1.1, speed: 20, turretRot: 1.5 }, startY: 0.9, hullWidth: 4.2 },
++  shotkaldalet: { name: "Shot Kal Dalet (Izrael)", stats: { hp: 125, damage: 1.15, speed: 12, turretRot: 1.1 }, startY: 1.3, hullWidth: 6.0 },
++  nahueldl43: { name: "Nahuel DL 43 (Argentyna)", stats: { hp: 98, damage: 1.0, speed: 14, turretRot: 1.4 }, startY: 1.2, hullWidth: 5.5 },
++  chonmaho: { name: "Ch'ŏnma-ho (Korea Północna)", stats: { hp: 115, damage: 1.1, speed: 15, turretRot: 1.3 }, startY: 1.1, hullWidth: 6.0 },
++  k2blackpanther: { name: "K2 Black Panther (Korea Południowa)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, startY: 1.5, hullWidth: 6.8 },
++  rooikat: { name: "Rooikat (RPA)", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, startY: 0.8, hullWidth: 3.5 }, // Rooikat to pojazd kołowy, niski Y
+ };
+ 
+ const WEAPONS_DATA = {
+``````diff
+--- a/multiplayer/style.css
++++ b/multiplayer/style.css
+@@ -43,6 +43,9 @@ canvas {
+ }
+ #start-screen {
+   background: url("https://www.transparenttextures.com/patterns/carbon-fibre.png"), rgba(0, 0, 0, 0.9);
++  overflow-y: auto; /* Dodano przewijanie dla wielu czołgów */
++  padding-top: 20px;
++  padding-bottom: 20px;
+ }
+ #selection-title {
+   font-size: 3em;
+@@ -51,64 +54,74 @@ canvas {
+   margin-bottom: 20px;
+ }
+ .tank-selection-container {
+-  display: flex;
++  display: grid; /* Zmieniono na grid */
++  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); /* 5 czołgów w rzędzie, responsywnie */
++  gap: 20px; /* Zmniejszony odstęp */
++  width: 95%; /* Zwiększona szerokość, aby zmieścić więcej kolumn */
++  max-width: 1400px; /* Zwiększona maksymalna szerokość */
++  margin-bottom: 30px; /* Odstęp od panelu serwera */
+   justify-content: center;
+-  gap: 30px;
+-  width: 90%;
+-  max-width: 1200px;
++  align-items: start; /* Wyrównanie do góry w gridzie */
+ }
+ .tank-card {
+   border: 2px solid #555;
+   border-radius: 10px;
+   background-color: rgba(20, 20, 20, 0.7);
+-  padding: 20px;
+-  width: 300px;
++  padding: 15px; /* Zmniejszony padding */
++  width: auto; /* Pozwól gridowi zarządzać szerokością */
++  min-width: 200px; /* Minimalna szerokość dla czytelności */
+   transition: transform 0.2s, box-shadow 0.2s;
+   position: relative;
+   display: flex;
+   flex-direction: column;
++  justify-content: space-between; /* Rozciągnij elementy na całą wysokość karty */
++  height: 380px; /* Stała wysokość karty dla jednolitego wyglądu */
+ }
+ .tank-card:not(.locked):hover {
+-  transform: translateY(-10px);
+-  box-shadow: 0 10px 20px rgba(255, 193, 7, 0.3);
++  transform: translateY(-8px); /* Zmniejszono transformację */
++  box-shadow: 0 8px 16px rgba(255, 193, 7, 0.3); /* Zmniejszono cień */
+   border-color: #ffc107;
+ }
+ .tank-card.locked {
+   opacity: 0.6;
+ }
+-.tank-canvas {
+-  width: 100%;
+-  height: 150px;
+-  margin-bottom: 15px;
+-  border-radius: 5px;
+-  cursor: grab;
+-}
+-.tank-canvas:active {
+-    cursor: grabbing;
+-}
+ .premium-label {
+   position: absolute;
+-  top: -15px;
+-  right: -15px;
++  top: -10px; /* Zmniejszone przesunięcie */
++  right: -10px; /* Zmniejszone przesunięcie */
+   background: #ffc107;
+   color: #000;
+-  padding: 5px 10px;
+-  border-radius: 5px;
++  padding: 4px 8px; /* Zmniejszony padding */
++  border-radius: 4px; /* Zmniejszony border-radius */
+   font-weight: bold;
+-  transform: rotate(15deg);
++  transform: rotate(10deg); /* Zmniejszony kąt obrotu */
++  font-size: 0.8em;
+ }
+ .tank-card h3 {
+   color: #ffc107;
+   margin-top: 0;
+-  font-size: 1.5em;
++  font-size: 1.3em; /* Zmniejszona czcionka */
++  margin-bottom: 10px;
++}
++.tank-canvas {
++  width: 100%;
++  height: 120px; /* Zmniejszona wysokość canvasa */
++  margin-bottom: 10px;
++  border-radius: 5px;
++  cursor: grab;
++  background-color: rgba(0, 0, 0, 0.3); /* Dodano tło dla lepszej widoczności miniatury */
++}
++.tank-canvas:active {
++    cursor: grabbing;
+ }
+ .stats-container {
+   text-align: left;
+-  margin: 15px 0;
+-  font-size: 0.9em;
++  margin: 10px 0; /* Zmniejszony margines */
++  font-size: 0.8em; /* Zmniejszona czcionka */
++  flex-grow: 1; /* Rozciągnij kontener statystyk */
+ }
+ .stat-line {
+-  margin-bottom: 8px;
++  margin-bottom: 5px; /* Zmniejszony margines */
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+@@ -118,12 +131,13 @@ canvas {
+   width: 60%;
+   background: #333;
+   border-radius: 5px;
+-  height: 15px;
++  height: 12px; /* Zmniejszona wysokość paska */
+   border: 1px solid #777;
+ }
+ .stat-bar-fill {
+   height: 100%;
+   border-radius: 5px;
++  max-width: 100%; /* Upewnij się, że nie wychodzi poza pasek */
+   background: linear-gradient(to right, #28a745, #1d7e36);
+   transition: width 0.3s ease-in-out;
+ }
+@@ -131,12 +145,13 @@ canvas {
+   background: #28a745;
+   border: none;
+   color: white;
+-  padding: 10px 20px;
+-  font-size: 1em;
++  padding: 8px 15px; /* Zmniejszony padding */
++  font-size: 0.9em; /* Zmniejszona czcionka */
+   border-radius: 5px;
+   cursor: pointer;
+   transition: background-color 0.2s;
+-  margin-top: auto;
++  margin-top: 15px; /* Dodatkowy margines na górze */
++  width: 100%; /* Przycisk na całą szerokość */
+ }
+ .select-button:hover {
+   background: #218838;
+``````diff
+--- /dev/null
++++ b/multiplayer/tankModels.js
+@@ -0,0 +1,1529 @@
++// tankModels.js
++// Ten plik zawiera definicje modeli 3D dla różnych typów czołgów.
++
++import * as THREE from "three";
++import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
++
++// --- STAŁE I MATERIAŁY WSPÓLNE DLA CZOŁGÓW ---
++export const LAMBERT_MATERIAL = (color) => new THREE.MeshLambertMaterial({ color });
++
++function createTrackTexture() {
++  const canvas = document.createElement("canvas");
++  canvas.width = 32;
++  canvas.height = 128;
++  const ctx = canvas.getContext("2d");
++  ctx.fillStyle = "#3a3a3a";
++  ctx.fillRect(0, 0, 32, 128);
++  ctx.fillStyle = "#2a2a2a";
++  for (let i = 0; i < 128; i += 8) {
++    ctx.fillRect(0, i, 32, 4);
++  }
++  const texture = new THREE.CanvasTexture(canvas);
++  texture.wrapS = THREE.RepeatWrapping;
++  texture.wrapT = THREE.RepeatWrapping;
++  return texture;
++}
++
++// Zmieniono na eksport, aby był widoczny dla innych modułów, jeśli zajdzie taka potrzeba
++export const trackMaterial = new THREE.MeshLambertMaterial({ map: createTrackTexture() });
++
++
++// --- FUNKCJE TWORZĄCE MODELE CZOŁGÓW ---
++
++/**
++ * Tworzy siatkę 3D dla standardowego czołgu. (USA: M4 Sherman)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createStandardTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.5, hullHeight = 1.8, hullLength = 9.0;
++    
++    // Główny kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength - 2), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Glacis (przednia płyta)
++    const glacis = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight * 1.2, 2.5), hullMaterial);
++    glacis.position.set(0, hullHeight / 2 - 0.2, -hullLength / 2 + 0.5);
++    glacis.rotation.x = -Math.PI / 6;
++    hullGroup.add(glacis);
++
++    // Gąsienice
++    const trackWidth = 1.2, trackHeight = 2.4, trackLength = hullLength + 1;
++    const trackGroup = new THREE.Group();
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    const rightTrack = leftTrack.clone();
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    trackGroup.add(leftTrack, rightTrack);
++    
++    tank.add(hullGroup);
++
++    // Wieża (convex geometry dla bardziej złożonego kształtu)
++    const turretPoints = [
++        new THREE.Vector3(2, 0, 2),
++        new THREE.Vector3(2, 0, -2.5),
++        new THREE.Vector3(-2, 0, -2.5),
++        new THREE.Vector3(-2, 0, 2),
++        new THREE.Vector3(1.5, 2, 1.5),
++        new THREE.Vector3(1.5, 2, -2),
++        new THREE.Vector3(-1.5, 2, -2),
++        new THREE.Vector3(-1.5, 2, 1.5)
++    ];
++    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.8, -2.5);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 6, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 1;
++
++    hullGroup.add(turretGroup);
++
++    // Punkt wylotu spalin
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, (hullLength - 2) / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup; // Referencja do grupy kadłuba
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu PL-01 Concept. (Polska)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createPL01Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 6.0, hullHeight = 1.5, hullLength = 9.5;
++    
++    // Główny kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.8, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Panele boczne (stealth look)
++    const sidePanelGeom = new THREE.BoxGeometry(0.5, hullHeight * 1.5, hullLength);
++    const leftPanel = new THREE.Mesh(sidePanelGeom, hullMaterial);
++    leftPanel.position.set(-hullWidth / 2, hullHeight / 2, 0);
++    leftPanel.rotation.z = 0.5;
++    hullGroup.add(leftPanel);
++
++    const rightPanel = new THREE.Mesh(sidePanelGeom, hullMaterial);
++    rightPanel.position.set(hullWidth / 2, hullHeight / 2, 0);
++    rightPanel.rotation.z = -0.5;
++    hullGroup.add(rightPanel);
++
++    tank.add(hullGroup);
++
++    // Gąsienice (bardziej schowane)
++    const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 1;
++    const trackGroup = new THREE.Group();
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 + 0.5;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 - 0.5;
++    trackGroup.add(leftTrack, rightTrack);
++    trackGroup.position.y = trackHeight / 2 - 0.5;
++    hullGroup.add(trackGroup);
++
++    // Wieża (bardziej płaska, futurystyczna)
++    const turretPoints = [
++        new THREE.Vector3(2.5, 0, 3),
++        new THREE.Vector3(2.5, 0, -3),
++        new THREE.Vector3(-2.5, 0, -3),
++        new THREE.Vector3(-2.5, 0, 3),
++        new THREE.Vector3(0, 1.8, 2.5),
++        new THREE.Vector3(0, 1.8, -2.5)
++    ];
++    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.5), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.6, -2.8);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 7), LAMBERT_MATERIAL(0x333333));
++    barrel.position.z = 3.5;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 0, 3.5);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight;
++    hullGroup.add(turretGroup);
++
++    // Punkt wylotu spalin
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.7, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu M1 Abrams. (USA - Premium)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createAbramsTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 6.5, hullHeight = 2.0, hullLength = 10.0;
++    
++    // Główny kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth * 0.7, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.4, trackHeight = 2.0, trackLength = hullLength;
++    const trackGroup = new THREE.Group();
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 + 0.8;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 - 0.8;
++    trackGroup.add(leftTrack, rightTrack);
++    trackGroup.position.y = trackHeight / 2 - 0.6;
++    hullGroup.add(trackGroup);
++
++    tank.add(hullGroup);
++
++    // Wieża (bardziej zaokrąglona i masywna)
++    const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.2, 1.0, 8), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    turretBase.position.y = 0.5; // Lekko podniesiona, żeby była nad kadłubem
++    turretGroup.add(turretBase);
++    
++    const turretTop = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 6.0), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    turretTop.position.y = 1.1;
++    turretGroup.add(turretTop);
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.5, -3.0);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 8, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 4;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 4, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight;
++    hullGroup.add(turretGroup);
++
++    // Punkt wylotu spalin
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.5, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++
++// === NOWE MODELE CZOŁGÓW ===
++
++/**
++ * Tworzy siatkę 3D dla czołgu Tiger I. (Niemcy)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createTigerITank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 7.0, hullHeight = 2.2, hullLength = 11.0;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.8, trackHeight = 2.5, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++    
++    tank.add(hullGroup);
++
++    // Wieża (kwadratowa)
++    const turretGeometry = new THREE.BoxGeometry(4.5, 2.5, 4.5);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 1), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.5, -2.5);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.35, 7, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3.5;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3.5, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 1;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu T-34-85. (ZSRR)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createT3485Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.0, hullHeight = 1.7, hullLength = 9.0;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.1, trackHeight = 2.0, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (zaokrąglona)
++    const turretGeometry = new THREE.CylinderGeometry(2.5, 2.0, 1.8, 16, 1, false, 0, Math.PI * 2);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.5, -2.0);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 6, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Cromwell. (Wielka Brytania)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createCromwellTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 4.8, hullHeight = 1.6, hullLength = 8.5;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 0.5;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża
++    const turretGeometry = new THREE.BoxGeometry(2.8, 1.8, 3.0);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -1.8);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.2, 5, 10), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 2.5;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.5, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu AMX 13 75. (Francja)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createAMX1375Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group(); // Wieża oscylacyjna będzie ruchoma w całości
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 4.0, hullHeight = 1.2, hullLength = 7.0;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 0.9, trackHeight = 1.5, trackLength = hullLength + 0.5;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża oscylacyjna (uproszczony model)
++    const lowerTurret = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 0.8, 12), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    lowerTurret.position.y = 0.4; // Zmieniono na 0.4, aby była bliżej "ziemi"
++    turretGroup.add(lowerTurret);
++
++    const upperTurretPoints = [
++        new THREE.Vector3(1.2, 0, 1.5), new THREE.Vector3(1.2, 0, -2.0),
++        new THREE.Vector3(-1.2, 0, -2.0), new THREE.Vector3(-1.2, 0, 1.5),
++        new THREE.Vector3(0.8, 1.0, 1.0), new THREE.Vector3(0.8, 1.0, -1.5),
++        new THREE.Vector3(-0.8, 1.0, -1.5), new THREE.Vector3(-0.8, 1.0, 1.0)
++    ];
++    const upperTurret = new THREE.Mesh(new ConvexGeometry(upperTurretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.15)));
++    upperTurret.position.y = 0.8; // w relacji do dolnej części wieży
++    turretGroup.add(upperTurret);
++    
++    // Lufa jest częścią ruchomej górnej części wieży, nie ma osobnego jarzma
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 4.5, 8), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.set(0, 0.8, 2.2); // W relacji do górnej części wieży
++    upperTurret.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.25, 0); // W relacji do lufy
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1; // Cała wieża jest ruchoma
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup; // Cała grupa wieży jest obiektem obrotu
++    tank.mantlet = upperTurret; // Użyjemy górnej części wieży jako "mantlet" dla uproszczenia obrotu X
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Type 59. (Chiny)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createType59Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.8, hullHeight = 1.9, hullLength = 9.5;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.2, trackHeight = 2.2, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (zaokrąglona, "garbaty" kształt T-54)
++    const turretGeometry = new THREE.SphereGeometry(2.5, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
++    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    turretTop.rotation.x = Math.PI / 2; // Obrót, aby podstawa była płaska
++    turretTop.position.y = 0.5; // Delikatnie podniesiona
++    turretGroup.add(turretTop);
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 1.0), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -2.2);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.3, 6.5, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3.25;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3.25, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Chi-Ha. (Japonia)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createChiHaTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 4.5, hullHeight = 1.5, hullLength = 7.5;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 0.9, trackHeight = 1.6, trackLength = hullLength + 0.5;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (cylindryczna)
++    const turretGeometry = new THREE.CylinderGeometry(2.0, 2.0, 1.5, 12);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 0.7), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.3, -1.2);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 4.0, 8), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 2.0;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.0, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Strv 103B. (Szwecja)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createStrv103BTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group(); // W Strv 103B cały kadłub jest ruchomy góra-dół
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 6.0, hullHeight = 1.5, hullLength = 10.0;
++
++    // Kadłub (niska sylwetka, klinowy przód)
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    const frontWedgePoints = [
++        new THREE.Vector3(-hullWidth / 2, 0, -hullLength / 2),
++        new THREE.Vector3(hullWidth / 2, 0, -hullLength / 2),
++        new THREE.Vector3(hullWidth / 2 * 0.8, hullHeight * 0.8, -hullLength / 2 + 3),
++        new THREE.Vector3(-hullWidth / 2 * 0.8, hullHeight * 0.8, -hullLength / 2 + 3),
++        new THREE.Vector3(-hullWidth / 2, 0, hullLength / 2), // tył
++        new THREE.Vector3(hullWidth / 2, 0, hullLength / 2),  // tył
++        new THREE.Vector3(hullWidth / 2 * 0.8, hullHeight * 0.8, hullLength / 2 - 3), // tył góra
++        new THREE.Vector3(-hullWidth / 2 * 0.8, hullHeight * 0.8, hullLength / 2 - 3) // tył góra
++    ];
++    // Zbudujmy uproszczony kadłub z ConvexGeometry, żeby oddać kształt.
++    const customHull = new THREE.Mesh(new ConvexGeometry(frontWedgePoints), hullMaterial);
++    customHull.position.y = hullHeight / 2; // Ustawienie na wysokości
++    // Usuwamy mainHull, bo customHull go zastępuje
++    hullGroup.remove(mainHull);
++    hullGroup.add(customHull);
++
++
++    // Gąsienice
++    const trackWidth = 1.3, trackHeight = 1.8, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Lufa jest sztywno zamontowana w kadłubie, nie ma wieży ani jarzma
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 7.0, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.set(0, hullHeight * 0.5 + 0.3, -hullLength / 2 + 3.5); // Lufa z przodu kadłuba
++    hullGroup.add(barrel); // Lufa jest częścią hullGroup
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3.5, 0);
++    barrel.add(barrelTip);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = new THREE.Group(); // Pusta grupa na wieżę, bo jej nie ma
++    tank.mantlet = new THREE.Group(); // Pusta grupa na jarzmo
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu P40. (Włochy)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createP40Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.2, hullHeight = 1.8, hullLength = 8.8;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.1, trackHeight = 2.0, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (kanciasta)
++    const turretGeometry = new THREE.BoxGeometry(3.0, 2.0, 3.5);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -2.0);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.5, 10), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 2.75;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.75, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Škoda T 25. (Czechosłowacja)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createSkodaT25Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 4.8, hullHeight = 1.7, hullLength = 8.0;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.0, trackHeight = 1.8, trackLength = hullLength + 0.8;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (zaokrąglona, z załadowaniem automatycznym)
++    const turretGeometry = new THREE.CylinderGeometry(2.2, 1.8, 1.6, 16);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -1.5);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.0, 10), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 2.5;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.5, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Ram II. (Kanada)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createRamIITank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.6, hullHeight = 2.0, hullLength = 8.5;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.3, trackHeight = 2.2, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (okrągła, niski profil)
++    const turretGeometry = new THREE.CylinderGeometry(2.5, 2.5, 1.2, 24);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.3, -1.8);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 5.8, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 2.9;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.9, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Sentinel AC 1. (Australia)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createSentinelAC1Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.3, hullHeight = 1.9, hullLength = 8.7;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.1, trackHeight = 2.1, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (odlewana, zaokrąglona)
++    const turretGeometry = new THREE.SphereGeometry(2.3, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2);
++    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    turretTop.rotation.x = Math.PI / 2;
++    turretTop.position.y = 0.5;
++    turretGroup.add(turretTop);
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -2.0);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 5.5, 10), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 2.75;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.75, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Turán III. (Węgry)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createTuranIIITank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.0, hullHeight = 1.7, hullLength = 8.0;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.0, trackHeight = 1.9, trackLength = hullLength + 0.8;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (duża, lekko zaokrąglona)
++    const turretGeometry = new THREE.CylinderGeometry(2.3, 2.0, 1.7, 16);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -1.5);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.23, 5.2, 10), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 2.6;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 2.6, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu BT-42. (Finlandia)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createBT42Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 4.2, hullHeight = 1.5, hullLength = 7.0;
++
++    // Kadłub (BT-7)
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 0.8, trackHeight = 1.5, trackLength = hullLength + 0.5;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (duża, zaokrąglona jak haubica)
++    const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.2, 0.8, 16), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    turretBase.position.y = 0.4; // Zmieniono na 0.4, aby była bliżej "ziemi"
++    turretGroup.add(turretBase);
++
++    const turretTopPoints = [
++        new THREE.Vector3(2.0, 0, 2.0), new THREE.Vector3(2.0, 0, -2.0),
++        new THREE.Vector3(-2.0, 0, -2.0), new THREE.Vector3(-2.0, 0, 2.0),
++        new THREE.Vector3(1.5, 1.5, 1.5), new THREE.Vector3(1.5, 1.5, -1.5),
++        new THREE.Vector3(-1.5, 1.5, -1.5), new THREE.Vector3(-1.5, 1.5, 1.5)
++    ];
++    const turretTop = new THREE.Mesh(new ConvexGeometry(turretTopPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.15)));
++    turretTop.position.y = 0.8;
++    turretGroup.add(turretTop);
++
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 1.0), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.5, -1.5);
++    turretTop.add(mantlet); // Mantlet jest częścią górnej wieży, nie całej grupy
++
++    // Lufa (krótka haubica)
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.4, 3.0, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 1.5;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 1.5, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Shot Kal Dalet (Centurion). (Izrael)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createShotKalDaletTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 6.0, hullHeight = 2.0, hullLength = 10.0;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.4, trackHeight = 2.2, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (Centurion, odlewana)
++    const turretGeometry = new THREE.SphereGeometry(2.8, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
++    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    turretTop.rotation.x = Math.PI / 2;
++    turretTop.position.y = 0.5;
++    turretGroup.add(turretTop);
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.8, 1.0), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.5, -2.5);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.33, 7.0, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3.5;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3.5, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Nahuel DL 43. (Argentyna)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createNahuelDL43Tank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 5.5, hullHeight = 1.9, hullLength = 9.0;
++
++    // Kadłub (podobny do Shermana)
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.2, trackHeight = 2.1, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (kanciasta)
++    const turretGeometry = new THREE.BoxGeometry(3.2, 2.0, 3.5);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -2.0);
++    turretGroup.add(mantlet);
++
++    // Lufa
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 6.0, 10), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3.0;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3.0, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    turretGroup.position.z = 0;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Ch'ŏnma-ho (T-62). (Korea Północna)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createChonmaHoTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 6.0, hullHeight = 1.8, hullLength = 9.5;
++
++    // Kadłub
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.3, trackHeight = 2.0, trackLength = hullLength + 1;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (duża, okrągła, odlewana - jak w T-62)
++    const turretGeometry = new THREE.SphereGeometry(2.7, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
++    const turretTop = new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1)));
++    turretTop.rotation.x = Math.PI / 2;
++    turretTop.position.y = 0.5;
++    turretGroup.add(turretTop);
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.6, 1.0), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -2.5);
++    turretGroup.add(mantlet);
++
++    // Lufa (długa, potężna)
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.35, 7.5, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3.75;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3.75, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu K2 Black Panther. (Korea Południowa)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createK2BlackPantherTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 6.8, hullHeight = 2.2, hullLength = 10.5;
++
++    // Kadłub (nowoczesny, kanciasty)
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Gąsienice
++    const trackWidth = 1.5, trackHeight = 2.5, trackLength = hullLength + 1.5;
++    const leftTrack = new THREE.Mesh(new THREE.BoxGeometry(trackWidth, trackHeight, trackLength), trackMaterial);
++    leftTrack.position.x = -hullWidth / 2 - trackWidth / 2;
++    const rightTrack = leftTrack.clone();
++    rightTrack.position.x = hullWidth / 2 + trackWidth / 2;
++    hullGroup.add(leftTrack, rightTrack);
++
++    tank.add(hullGroup);
++
++    // Wieża (nowoczesna, kanciasta, niski profil)
++    const turretPoints = [
++        new THREE.Vector3(3.0, 0, 3.5), new THREE.Vector3(3.0, 0, -3.5),
++        new THREE.Vector3(-3.0, 0, -3.5), new THREE.Vector3(-3.0, 0, 3.5),
++        new THREE.Vector3(2.5, 1.5, 3.0), new THREE.Vector3(2.5, 1.5, -3.0),
++        new THREE.Vector3(-2.5, 1.5, -3.0), new THREE.Vector3(-2.5, 1.5, 3.0),
++        new THREE.Vector3(0, 2.0, 2.8), new THREE.Vector3(0, 2.0, -2.8) // Kątowe płyty wieży
++    ];
++    turretGroup.add(new THREE.Mesh(new ConvexGeometry(turretPoints), LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.8, 1.2), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.6, -3.0);
++    turretGroup.add(mantlet);
++
++    // Lufa (długa, potężna)
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.38, 8.0, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 4.0;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 4.0, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}
++
++/**
++ * Tworzy siatkę 3D dla czołgu Rooikat. (Republika Południowej Afryki)
++ * @param {THREE.Color} color - Kolor czołgu.
++ * @returns {THREE.Group} Grupa reprezentująca model czołgu.
++ */
++export function createRooikatTank(color) {
++    const tank = new THREE.Group();
++    const hullGroup = new THREE.Group();
++    const turretGroup = new THREE.Group();
++    const hullMaterial = LAMBERT_MATERIAL(color);
++
++    const hullWidth = 3.5, hullHeight = 1.5, hullLength = 9.0; // Długi i wąski kadłub, kołowy
++
++    // Kadłub (kołowy pojazd, użyjemy box geometry dla uproszczenia, ale z dużą długością)
++    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(hullWidth, hullHeight, hullLength), hullMaterial);
++    mainHull.position.y = hullHeight / 2;
++    hullGroup.add(mainHull);
++
++    // Koła (8x8), dla uproszczenia jako proste cylindry
++    const wheelRadius = 1.0;
++    const wheelThickness = 0.5;
++    const wheelMaterial = LAMBERT_MATERIAL(0x222222);
++
++    for (let i = 0; i < 4; i++) {
++        const wheelOffset = hullLength / 2 - (i * (hullLength / 3)); // Rozłożenie kół
++        const leftWheel = new THREE.Mesh(new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelThickness, 12), wheelMaterial);
++        leftWheel.rotation.x = Math.PI / 2; // Obrót, aby cylinder był "leżący"
++        leftWheel.position.set(-hullWidth / 2 - wheelThickness / 2, -wheelRadius + 0.1, wheelOffset);
++        hullGroup.add(leftWheel);
++
++        const rightWheel = leftWheel.clone();
++        rightWheel.position.x = hullWidth / 2 + wheelThickness / 2;
++        hullGroup.add(rightWheel);
++    }
++    
++    tank.add(hullGroup);
++
++    // Wieża (niska, lekko kanciasta)
++    const turretGeometry = new THREE.BoxGeometry(2.5, 1.5, 3.0);
++    turretGroup.add(new THREE.Mesh(turretGeometry, LAMBERT_MATERIAL(color.clone().offsetHSL(0, 0, 0.1))));
++
++    // Jarzmo działa
++    const mantlet = new THREE.Group();
++    mantlet.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.0, 0.8), LAMBERT_MATERIAL(0x444444)));
++    mantlet.position.set(0, 0.4, -1.8);
++    turretGroup.add(mantlet);
++
++    // Lufa (długa, armata dużej prędkości)
++    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 6.5, 12), LAMBERT_MATERIAL(0x333333));
++    barrel.rotation.x = Math.PI / 2;
++    barrel.position.z = 3.25;
++    mantlet.add(barrel);
++
++    // Koniec lufy (punkt wylotu pocisku)
++    const barrelTip = new THREE.Object3D();
++    barrelTip.position.set(0, 3.25, 0);
++    barrel.add(barrelTip);
++
++    turretGroup.position.y = hullHeight + 0.1;
++    hullGroup.add(turretGroup);
++
++    const exhaustPoint = new THREE.Object3D();
++    exhaustPoint.position.set(0, hullHeight * 0.6, hullLength / 2 - 1.0);
++    hullGroup.add(exhaustPoint);
++
++    tank.hullGroup = hullGroup;
++    tank.turret = turretGroup;
++    tank.mantlet = mantlet;
++    tank.barrel = barrel;
++    tank.barrelTip = barrelTip;
++    tank.exhaustPoint = exhaustPoint;
++
++    return tank;
++}

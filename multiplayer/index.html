@@ -14,40 +14,7 @@
     <div id="start-screen" class="overlay" style="display: none">
       <h1 id="selection-title">Wybierz Swój Czołg</h1>
       <div class="tank-selection-container">
-        <div class="tank-card" id="select-pl01">
-          <h3>PL-01 Concept</h3>
-          <canvas id="canvas-pl01" class="tank-canvas"></canvas>
-          <div class="stats-container">
-            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-pl01-hp" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-pl01-dmg" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-pl01-spd" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-pl01-rot" class="stat-bar-fill"></div></div></div>
-          </div>
-          <button class="select-button">Wybierz i Walcz</button>
-        </div>
-        <div class="tank-card locked" id="select-abrams">
-          <div class="premium-label">PREMIUM</div>
-          <h3>M1 Abrams</h3>
-          <canvas id="canvas-abrams" class="tank-canvas"></canvas>
-          <div class="stats-container">
-            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-abrams-hp" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-abrams-dmg" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-abrams-spd" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-abrams-rot" class="stat-bar-fill"></div></div></div>
-          </div>
-          <button class="select-button" disabled>Wybierz</button>
-        </div>
-        <div class="tank-card" id="select-standard">
-          <h3>Standard</h3>
-          <canvas id="canvas-standard" class="tank-canvas"></canvas>
-          <div class="stats-container">
-            <div class="stat-line"><span>Życie</span><div class="stat-bar-container"><div id="bar-standard-hp" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Obrażenia</span><div class="stat-bar-container"><div id="bar-standard-dmg" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Prędkość</span><div class="stat-bar-container"><div id="bar-standard-spd" class="stat-bar-fill"></div></div></div>
-            <div class="stat-line"><span>Obrót Wieży</span><div class="stat-bar-container"><div id="bar-standard-rot" class="stat-bar-fill"></div></div></div>
-          </div>
-          <button class="select-button">Wybierz i Walcz</button>
-        </div>
+        <!-- Karty czołgów będą generowane dynamicznie przez JavaScript -->
       </div>
        <fieldset id="server-config-panel">
         <div id="terrain-controls">
@@ -128,6 +95,8 @@
       }
     </script>
     <script type="module" src="background.js"></script>
+    <script type="module" src="environment.js"></script>
+    <script type="module" src="tankModels.js"></script>
     <script type="module" src="script.js"></script>
   </body>
 </html>
