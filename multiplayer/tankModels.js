@@ -1544,3 +1544,134 @@ export function createRooikatTank(color) {
 
     return tank;
 }
+
+/**
+ * Tworzy siatkę 3D dla helikoptera szturmowego.
+ * @param {THREE.Color} color - Kolor jednostki.
+ * @returns {THREE.Group} Grupa reprezentująca model helikoptera.
+ */
+export function createHelicopter(color) {
+    const helicopter = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    
+    const matName = 'heliMat';
+    const mainMaterial = LAMBERT_MATERIAL(color, matName);
+    const darkMaterial = LAMBERT_MATERIAL(0x333333, 'heliDark');
+    const glassMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x88ccff, 
+        transparent: true, 
+        opacity: 0.6, 
+        shininess: 100 
+    });
+
+    // --- KADŁUB ---
+    const bodyGeom = new THREE.BoxGeometry(2.5, 3.0, 8.0);
+    const body = new THREE.Mesh(bodyGeom, mainMaterial);
+    body.position.y = 2.0;
+    hullGroup.add(body);
+
+    // Kokpit (szyba)
+    const cockpitGeom = new THREE.BoxGeometry(2.2, 1.5, 2.5);
+    const cockpit = new THREE.Mesh(cockpitGeom, glassMaterial);
+    cockpit.position.set(0, 2.5, 4.0); // Z przodu
+    cockpit.rotation.x = 0.2;
+    hullGroup.add(cockpit);
+
+    // Ogon
+    const tailGeom = new THREE.BoxGeometry(1.0, 1.0, 9.0);
+    const tail = new THREE.Mesh(tailGeom, mainMaterial);
+    tail.position.set(0, 2.5, -6.5);
+    hullGroup.add(tail);
+
+    // Płozy
+    const skidGeom = new THREE.BoxGeometry(0.5, 0.5, 7.0);
+    const leftSkid = new THREE.Mesh(skidGeom, darkMaterial);
+    leftSkid.position.set(-1.5, 0.25, 1.0);
+    const rightSkid = new THREE.Mesh(skidGeom, darkMaterial);
+    rightSkid.position.set(1.5, 0.25, 1.0);
+    
+    // Nogi płóz
+    const legGeom = new THREE.BoxGeometry(0.3, 1.5, 0.3);
+    const legFL = new THREE.Mesh(legGeom, darkMaterial); legFL.position.set(-1.5, 1.0, 3.0);
+    const legBL = new THREE.Mesh(legGeom, darkMaterial); legBL.position.set(-1.5, 1.0, -1.0);
+    const legFR = new THREE.Mesh(legGeom, darkMaterial); legFR.position.set(1.5, 1.0, 3.0);
+    const legBR = new THREE.Mesh(legGeom, darkMaterial); legBR.position.set(1.5, 1.0, -1.0);
+    
+    hullGroup.add(leftSkid, rightSkid, legFL, legBL, legFR, legBR);
+
+    // Wirnik główny
+    const rotorGroup = new THREE.Group();
+    const bladeGeom = new THREE.BoxGeometry(0.5, 0.1, 14.0);
+    const blade1 = new THREE.Mesh(bladeGeom, darkMaterial);
+    const blade2 = blade1.clone(); blade2.rotation.y = Math.PI / 2;
+    rotorGroup.add(blade1, blade2);
+    rotorGroup.position.set(0, 4.0, 0); // Na górze kadłuba
+    hullGroup.add(rotorGroup);
+
+    // Wirnik ogonowy
+    const tailRotorGroup = new THREE.Group();
+    const tailBladeGeom = new THREE.BoxGeometry(0.2, 2.5, 0.2);
+    const tailBlade1 = new THREE.Mesh(tailBladeGeom, darkMaterial);
+    const tailBlade2 = tailBlade1.clone(); tailBlade2.rotation.x = Math.PI / 2;
+    tailRotorGroup.add(tailBlade1, tailBlade2);
+    tailRotorGroup.position.set(0.6, 2.5, -10.5); // Na końcu ogona
+    hullGroup.add(tailRotorGroup);
+
+    // Pylony na rakiety (boczne skrzydła)
+    const wingGeom = new THREE.BoxGeometry(5.0, 0.5, 1.5);
+    const wings = new THREE.Mesh(wingGeom, mainMaterial);
+    wings.position.set(0, 2.0, 1.0);
+    hullGroup.add(wings);
+
+    // Podwieszone wyrzutnie rakiet
+    const podGeom = new THREE.CylinderGeometry(0.5, 0.5, 2.0, 8);
+    const leftPod = new THREE.Mesh(podGeom, darkMaterial);
+    leftPod.rotation.x = Math.PI / 2;
+    leftPod.position.set(-2.0, 1.5, 1.5);
+    const rightPod = leftPod.clone();
+    rightPod.position.set(2.0, 1.5, 1.5);
+    hullGroup.add(leftPod, rightPod);
+
+    helicopter.add(hullGroup);
+
+    // Działko pod dziobem (jako turret)
+    const turretGroup = new THREE.Group();
+    const gunGeom = new THREE.BoxGeometry(0.8, 0.8, 2.0);
+    const gunBody = new THREE.Mesh(gunGeom, darkMaterial);
+    gunBody.position.set(0, -0.5, 0); // Podwieszone
+    turretGroup.add(gunBody);
+
+    // Lufa działka
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3.0), darkMaterial);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, -0.5, 1.5);
+    turretGroup.add(barrel);
+
+    // Punkt wylotu pocisku
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 1.5, 0); // W lokalnym układzie lufy
+    barrel.add(barrelTip);
+
+    // Pozycjonowanie "wieży" (działka)
+    turretGroup.position.set(0, 1.5, 4.0); // Pod dziobem
+    hullGroup.add(turretGroup);
+
+    // Punkt wylotu spalin (dla efektu dymu przy uszkodzeniu)
+    const exhaustPoint = new THREE.Object3D();
+    exhaustPoint.position.set(0, 3.0, -2.0);
+    hullGroup.add(exhaustPoint);
+
+    // Przypisanie referencji
+    helicopter.hullGroup = hullGroup;
+    helicopter.turret = turretGroup; // Działko rusza się lewo/prawo
+    helicopter.mantlet = new THREE.Group(); // Atrapa, bo działko rusza się całe
+    helicopter.barrel = barrel;
+    helicopter.barrelTip = barrelTip;
+    helicopter.exhaustPoint = exhaustPoint;
+    
+    // Dodatkowe referencje dla animacji
+    helicopter.mainRotor = rotorGroup;
+    helicopter.tailRotor = tailRotorGroup;
+
+    return helicopter;
+}

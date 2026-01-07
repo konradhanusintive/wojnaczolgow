@@ -74,6 +74,7 @@ const TANKS_DATA = {
   chonmaho: { name: "Ch'ŏnma-ho (Korea Północna)", stats: { hp: 115, damage: 1.1, speed: 15, turretRot: 1.3 }, startY: 1.1, hullWidth: 6.0 },
   k2blackpanther: { name: "K2 Black Panther (Korea Południowa)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, startY: 1.5, hullWidth: 6.8 },
   rooikat: { name: "Rooikat (RPA)", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, startY: 0.8, hullWidth: 3.5 }, // Rooikat to pojazd kołowy, niski Y
+  helicopter: { name: "AH-64 Apache (USA)", stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 }, startY: 15.0, hullWidth: 4.0, isFlying: true },
 };
 
 const WEAPONS_DATA = {
@@ -374,6 +375,23 @@ function checkEnvironmentCollision(player, newPosX, newPosZ) {
     return false; // Brak kolizji
 }
 
+function getDynamicState() {
+    // Returns only the data that changes frequently to reduce network load
+    return {
+        players: gameState.players,
+        projectiles: gameState.projectiles,
+        missiles: gameState.missiles,
+        machineGunBullets: gameState.machineGunBullets,
+        mines: gameState.mines,
+        smokeClouds: gameState.smokeClouds,
+        fires: gameState.fires,
+        tracks: gameState.tracks,
+        crates: gameState.crates,
+        ammoCrates: gameState.ammoCrates
+        // Buildings, trees, and rocks are NOT sent every frame
+    };
+}
+
 function gameLoop() {
     const delta = 1 / 30;
 
@@ -457,17 +475,85 @@ function gameLoop() {
         }
         
         const tankData = TANKS_DATA[player.tankType];
-        const groundHeight = getHeightAt(player.position.x, player.position.z);
-        player.position.y = groundHeight + tankData.startY;
+        
+        // --- HELICOPTER & TANK INPUT HANDLING ---
+        if (tankData.isFlying && !player.isEmpDisabled) {
+            // Altitude
+            if (player.keys.Space) player.position.y += moveSpeed * 0.8;
+            if (player.keys.ShiftLeft || player.keys.ShiftRight) player.position.y -= moveSpeed * 0.8;
+            
+            // Rotation
+            if (player.keys.KeyA || player.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
+            if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
 
-        const halfLength = TANK_LENGTH / 2;
-        const frontX = player.position.x + Math.sin(player.rotation.y) * halfLength;
-        const frontZ = player.position.z + Math.cos(player.rotation.y) * halfLength;
-        const backX = player.position.x - Math.sin(player.rotation.y) * halfLength;
-        const backZ = player.position.z - Math.cos(player.rotation.y) * halfLength;
-        const frontHeight = getHeightAt(frontX, frontZ); const backHeight = getHeightAt(backX, backZ);
-        const heightDifference = backHeight - frontHeight;
-        player.rotation.x = Math.atan2(heightDifference, TANK_LENGTH);
+            // Vectors
+            const forwardDir = { x: Math.sin(player.rotation.y), z: Math.cos(player.rotation.y) };
+            const rightDir = { x: Math.cos(player.rotation.y), z: -Math.sin(player.rotation.y) };
+
+            // Movement (Impulse based)
+            if (player.keys.KeyW || player.keys.ArrowUp) {
+                player.impulse.x += forwardDir.x * moveSpeed * 0.15; 
+                player.impulse.z += forwardDir.z * moveSpeed * 0.15;
+            }
+            if (player.keys.KeyS || player.keys.ArrowDown) {
+                player.impulse.x -= forwardDir.x * moveSpeed * 0.1;
+                player.impulse.z -= forwardDir.z * moveSpeed * 0.1;
+            }
+            // Strafing (Q/E)
+            if (player.keys.KeyQ) {
+                player.impulse.x -= rightDir.x * moveSpeed * 0.1;
+                player.impulse.z -= rightDir.z * moveSpeed * 0.1;
+            }
+            if (player.keys.KeyE) {
+                player.impulse.x += rightDir.x * moveSpeed * 0.1;
+                player.impulse.z += rightDir.z * moveSpeed * 0.1;
+            }
+            
+            // Visual Tilt
+            let targetPitch = 0; let targetRoll = 0;
+            if (player.keys.KeyW) targetPitch = 0.25; else if (player.keys.KeyS) targetPitch = -0.15;
+            if (player.keys.KeyQ) targetRoll = 0.25; else if (player.keys.KeyE) targetRoll = -0.25;
+            
+            player.rotation.x = player.rotation.x * 0.9 + targetPitch * 0.1;
+            player.sinkingAngle.z = player.sinkingAngle.z * 0.9 + targetRoll * 0.1; // Use sinkingAngle.z for roll
+
+        } else if (!player.isEmpDisabled) {
+            // Standard Tank Movement
+            if (player.keys.KeyW || player.keys.ArrowUp) {
+                moveVector.x += Math.sin(player.rotation.y) * moveSpeed;
+                moveVector.z += Math.cos(player.rotation.y) * moveSpeed;
+            }
+            if (player.keys.KeyS || player.keys.ArrowDown) {
+                moveVector.x -= Math.sin(player.rotation.y) * moveSpeed * 0.7;
+                moveVector.z -= Math.cos(player.rotation.y) * moveSpeed * 0.7;
+            }
+            if (player.keys.KeyA || player.keys.ArrowLeft) player.rotation.y += rotateSpeed * 0.8;
+            if (player.keys.KeyD || player.keys.ArrowRight) player.rotation.y -= rotateSpeed * 0.8;
+        }
+
+        const groundHeight = getHeightAt(player.position.x, player.position.z);
+        
+        if (tankData.isFlying) {
+             const minHeight = groundHeight + 3.0; 
+             const maxHeight = 60.0;
+             player.position.y = Math.max(minHeight, Math.min(maxHeight, player.position.y));
+             
+             if (player.isDestroyed) {
+                 player.position.y = Math.max(groundHeight, player.position.y - 0.2);
+             }
+        } else {
+            // Standard Tank Height Logic
+            player.position.y = groundHeight + tankData.startY;
+
+            const halfLength = TANK_LENGTH / 2;
+            const frontX = player.position.x + Math.sin(player.rotation.y) * halfLength;
+            const frontZ = player.position.z + Math.cos(player.rotation.y) * halfLength;
+            const backX = player.position.x - Math.sin(player.rotation.y) * halfLength;
+            const backZ = player.position.z - Math.cos(player.rotation.y) * halfLength;
+            const frontHeight = getHeightAt(frontX, frontZ); const backHeight = getHeightAt(backX, backZ);
+            const heightDifference = backHeight - frontHeight;
+            player.rotation.x = Math.atan2(heightDifference, TANK_LENGTH);
+        }
 
         const safeZone = MAP_SIZE / 2;
         if (Math.abs(player.position.x) > safeZone + TANK_LENGTH / 2 || Math.abs(player.position.z) > safeZone + TANK_LENGTH / 2) {
@@ -792,7 +878,8 @@ function gameLoop() {
         }
     }
 
-    io.emit("gameStateUpdate", gameState);
+    // OPTIMIZATION: Send only dynamic state
+    io.emit("gameStateUpdate", getDynamicState());
 }
 
 function checkProjectileBuildingCollision(projectile, buildings) {

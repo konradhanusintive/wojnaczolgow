@@ -7,7 +7,7 @@ import {
     createType59Tank, createChiHaTank, createStrv103BTank, createP40Tank,
     createSkodaT25Tank, createRamIITank, createSentinelAC1Tank, createTuranIIITank,
     createBT42Tank, createShotKalDaletTank, createNahuelDL43Tank, createChonmaHoTank,
-    createK2BlackPantherTank, createRooikatTank
+    createK2BlackPantherTank, createRooikatTank, createHelicopter
 } from './tankModels.js'; 
 
 let scene, renderer, clock, camera;
@@ -216,6 +216,12 @@ const TANKS_DATA = {
     description: "Szybki, kołowy pojazd opancerzony z dużą armatą. Idealny do zwiadu, szybkich flankowań i nękania celów na otwartym terenie.", 
     stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, 
     create: createRooikatTank, hullWidth: 3.5, sniperCamYOffset: 1.6, isPremium: false 
+  },
+  helicopter: {
+    name: "AH-64 Apache (USA)",
+    description: "Helikopter szturmowy. Lata nad terenem, ignorując przeszkody naziemne. Wrażliwy na ostrzał, ale zabójczy z powietrza.",
+    stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 },
+    create: createHelicopter, hullWidth: 4.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true
   },
 };
 
@@ -844,6 +850,29 @@ function updateHUD() {
     const hpBar = document.getElementById('hp-bar'); hpBar.style.width = `${hpPercent}%`; hpBar.className = `hud-bar-fill ${hpPercent < 30 ? "low" : ""}`;
     document.getElementById('medkits-value').innerText = playerState.medkits; document.getElementById('score-value').innerText = playerState.score;
 
+    // HELICOPTER CONTROLS HUD
+    const heliControls = document.getElementById('heli-controls-hud');
+    if (playerState.tankType === 'helicopter') {
+        if (!heliControls) {
+            const div = document.createElement('div');
+            div.id = 'heli-controls-hud';
+            div.style.position = 'absolute'; div.style.top = '120px'; div.style.left = '20px';
+            div.style.color = 'rgba(255, 255, 255, 0.8)'; div.style.fontFamily = 'monospace'; div.style.fontSize = '14px';
+            div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; div.style.padding = '10px'; div.style.borderRadius = '5px';
+            div.innerHTML = `
+                <strong>STEROWANIE HELIKOPTEREM</strong><br>
+                [W / S] - Przód / Tył<br>
+                [A / D] - Obrót lewo/prawo<br>
+                [Q / E] - Lot bokiem (Strafe)<br>
+                [SPACJA] - W górę<br>
+                [SHIFT] - W dół
+            `;
+            document.body.appendChild(div);
+        } else { heliControls.style.display = 'block'; }
+    } else {
+        if (heliControls) heliControls.style.display = 'none';
+    }
+
     WEAPON_KEYS.forEach(key => {
         const slot = document.getElementById(`weapon-slot-${key}`);
         const ammoCount = playerState.ammo[key] || 0;
@@ -1336,6 +1365,12 @@ function animate() {
             const finalQuaternion = targetChassisQuaternion.multiply(targetPitchQuaternion).multiply(targetSinkingQuaternion);
             clientTank.quaternion.slerp(finalQuaternion, 0.15);
             
+            // Animacja wirników dla helikopterów
+            if (clientTank.mainRotor) {
+                clientTank.mainRotor.rotation.y += 15.0 * delta;
+                clientTank.tailRotor.rotation.x += 20.0 * delta;
+            }
+
             clientTank.exhaustCooldown -= delta;
             if (serverPlayer.keys.KeyW && clientTank.exhaustCooldown <= 0 && !serverPlayer.isDestroyed && !serverPlayer.isSinking) {
                 const exhaustPos = new THREE.Vector3();
@@ -1706,11 +1741,20 @@ socket.on('serverStatus', (data) => {
 });
 socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
 socket.on("gameStateUpdate", (serverState) => {
-    if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
-        serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;
-        serverState.players[localPlayerId].mantletRotation = clientGameState.players[localPlayerId].mantletRotation;
+    // Merge dynamic state instead of replacing everything to keep static objects (trees, buildings)
+    if (serverState.players) {
+        if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
+            serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;
+            serverState.players[localPlayerId].mantletRotation = clientGameState.players[localPlayerId].mantletRotation;
+        }
+        clientGameState.players = serverState.players;
     }
-    clientGameState = serverState;
+    // Update other dynamic lists if present
+    const dynamicKeys = ['projectiles', 'missiles', 'machineGunBullets', 'mines', 'smokeClouds', 'fires', 'tracks', 'crates', 'ammoCrates'];
+    dynamicKeys.forEach(key => {
+        if (serverState[key]) clientGameState[key] = serverState[key];
+    });
+    // Do NOT overwrite buildings, trees, rocks if not present in update
 });
 socket.on('objectCreated', (payload) => {
     if (!isGameStarted) return; 
