@@ -7,7 +7,8 @@ import {
     createType59Tank, createChiHaTank, createStrv103BTank, createP40Tank,
     createSkodaT25Tank, createRamIITank, createSentinelAC1Tank, createTuranIIITank,
     createBT42Tank, createShotKalDaletTank, createNahuelDL43Tank, createChonmaHoTank,
-    createK2BlackPantherTank, createRooikatTank, createHelicopter
+    createK2BlackPantherTank, createRooikatTank, createHelicopter,
+    createUFO, createIronWhale, createXDrone, createVoidGlider, createDragonfly, createBattleCube
 } from './tankModels.js'; 
 
 let scene, renderer, clock, camera;
@@ -222,6 +223,42 @@ const TANKS_DATA = {
     description: "Helikopter szturmowy. Lata nad terenem, ignorując przeszkody naziemne. Wrażliwy na ostrzał, ale zabójczy z powietrza.",
     stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 },
     create: createHelicopter, hullWidth: 4.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true
+  },
+  ufo: {
+    name: "Latający Spodek (Nieznany)",
+    description: "Obiekt niezidentyfikowanego pochodzenia. Wykorzystuje antygrawitację do płynnego poruszania się w każdym kierunku.",
+    stats: { hp: 50, damage: 1.5, speed: 25, turretRot: 3.0 },
+    create: createUFO, hullWidth: 4.5, sniperCamYOffset: -0.5, isPremium: true, isFlying: true
+  },
+  ironwhale: {
+    name: "Żelazny Wieloryb (Steampunk)",
+    description: "Opancerzony sterowiec bojowy. Powolny i majestatyczny, ale niezwykle wytrzymały. Latająca forteca.",
+    stats: { hp: 150, damage: 1.3, speed: 12, turretRot: 1.0 },
+    create: createIronWhale, hullWidth: 5.0, sniperCamYOffset: -2.0, isPremium: true, isFlying: true
+  },
+  xdrone: {
+    name: "X-Drone (Cyberpunk)",
+    description: "Zwrotny dron bojowy nowej generacji. Niezwykle trudny do trafienia dzięki małym rozmiarom i dużej szybkości.",
+    stats: { hp: 40, damage: 0.9, speed: 28, turretRot: 4.0 },
+    create: createXDrone, hullWidth: 2.5, sniperCamYOffset: 0.5, isPremium: true, isFlying: true
+  },
+  voidglider: {
+    name: "Pustynny Ślizgacz (Obcy)",
+    description: "Tajemniczy pojazd napędzany energią próżni. Cichy i zabójczy, idealny do ataków z zaskoczenia.",
+    stats: { hp: 65, damage: 1.4, speed: 24, turretRot: 2.0 },
+    create: createVoidGlider, hullWidth: 3.5, sniperCamYOffset: 0.0, isPremium: true, isFlying: true
+  },
+  dragonfly: {
+    name: "Ważka (Bio-Mech)",
+    description: "Bioniczny ornitopter o czterech skrzydłach. Potrafi zawisnąć w miejscu i błyskawicznie zmienić kierunek lotu.",
+    stats: { hp: 55, damage: 1.1, speed: 26, turretRot: 2.2 },
+    create: createDragonfly, hullWidth: 3.0, sniperCamYOffset: 0.0, isPremium: true, isFlying: true
+  },
+  battlecube: {
+    name: "Sześcian Bojowy (Abstrakcja)",
+    description: "Latający monolit. Ignoruje prawa aerodynamiki. Przerażająco wytrzymały i wyposażony w potężne działo energetyczne.",
+    stats: { hp: 180, damage: 1.6, speed: 10, turretRot: 0.5 },
+    create: createBattleCube, hullWidth: 6.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true
   },
 };
 
@@ -1369,6 +1406,28 @@ function animate() {
             if (clientTank.mainRotor) {
                 clientTank.mainRotor.rotation.y += 15.0 * delta;
                 clientTank.tailRotor.rotation.x += 20.0 * delta;
+            }
+            // Animacje nowych statków
+            if (clientTank.spinRing) { // UFO
+                clientTank.spinRing.rotation.z += 5.0 * delta;
+            }
+            if (clientTank.props) { // Iron Whale
+                clientTank.props.forEach(p => p.children[0].rotation.x += 10.0 * delta);
+            }
+            if (clientTank.rotors) { // X-Drone
+                clientTank.rotors.forEach(r => r.rotation.y += 20.0 * delta);
+            }
+            if (clientTank.crystal) { // Void Glider
+                clientTank.crystal.rotation.y += 2.0 * delta;
+                clientTank.crystal.rotation.z += 1.0 * delta;
+            }
+            if (clientTank.wings) { // Dragonfly
+                const wingSpeed = 30.0;
+                const angle = Math.sin(clock.getElapsedTime() * wingSpeed) * 0.5;
+                clientTank.wings[0].rotation.z = angle;
+                clientTank.wings[1].rotation.z = -angle;
+                clientTank.wings[2].rotation.z = -angle;
+                clientTank.wings[3].rotation.z = angle;
             }
 
             clientTank.exhaustCooldown -= delta;

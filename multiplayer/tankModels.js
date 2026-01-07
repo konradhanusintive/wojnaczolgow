@@ -1675,3 +1675,352 @@ export function createHelicopter(color) {
 
     return helicopter;
 }
+
+/**
+ * Tworzy UFO (Latający Spodek).
+ */
+export function createUFO(color) {
+    const ufo = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    const material = LAMBERT_MATERIAL(0xaaddff, 'ufoSilver'); // Srebrny
+    const domeMat = new THREE.MeshPhongMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8, shininess: 100 });
+    const darkMat = LAMBERT_MATERIAL(0x222222, 'ufoDark');
+
+    // Dysk główny
+    const diskGeom = new THREE.CylinderGeometry(3.5, 1.5, 1.0, 16);
+    const disk = new THREE.Mesh(diskGeom, material);
+    hullGroup.add(disk);
+
+    // Pierścień (będzie się kręcił)
+    const ringGeom = new THREE.TorusGeometry(3.5, 0.3, 8, 24);
+    const ring = new THREE.Mesh(ringGeom, darkMat);
+    ring.rotation.x = Math.PI / 2;
+    hullGroup.add(ring);
+
+    // Kopuła
+    const domeGeom = new THREE.SphereGeometry(1.2, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+    const dome = new THREE.Mesh(domeGeom, domeMat);
+    dome.position.y = 0.5;
+    hullGroup.add(dome);
+
+    ufo.add(hullGroup);
+
+    // Działko (pod spodem)
+    const turretGroup = new THREE.Group();
+    const gunBall = new THREE.Mesh(new THREE.SphereGeometry(0.5), darkMat);
+    turretGroup.add(gunBall);
+    
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.0), darkMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = 1.0;
+    turretGroup.add(barrel);
+
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 1.0, 0);
+    barrel.add(barrelTip);
+
+    turretGroup.position.y = -0.5;
+    hullGroup.add(turretGroup);
+
+    const exhaustPoint = new THREE.Object3D();
+    exhaustPoint.position.set(0, -0.5, 0);
+    hullGroup.add(exhaustPoint);
+
+    ufo.hullGroup = hullGroup;
+    ufo.turret = turretGroup;
+    ufo.mantlet = new THREE.Group();
+    ufo.barrel = barrel;
+    ufo.barrelTip = barrelTip;
+    ufo.exhaustPoint = exhaustPoint;
+    ufo.spinRing = ring; // Ref do animacji
+
+    return ufo;
+}
+
+/**
+ * Tworzy Zeppelin "Iron Whale".
+ */
+export function createIronWhale(color) {
+    const ship = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    const balloonMat = LAMBERT_MATERIAL(color, 'zeppColor');
+    const metalMat = LAMBERT_MATERIAL(0x555555, 'zeppMetal');
+
+    // Balon
+    const balloonGeom = new THREE.CylinderGeometry(2.0, 2.0, 9.0, 12);
+    const balloon = new THREE.Mesh(balloonGeom, balloonMat);
+    balloon.rotation.x = Math.PI / 2;
+    hullGroup.add(balloon);
+
+    // Gondola
+    const gondolaGeom = new THREE.BoxGeometry(1.5, 1.0, 4.0);
+    const gondola = new THREE.Mesh(gondolaGeom, metalMat);
+    gondola.position.y = -2.0;
+    hullGroup.add(gondola);
+
+    // Stateczniki
+    const finGeom = new THREE.BoxGeometry(0.2, 3.0, 2.0);
+    const finV = new THREE.Mesh(finGeom, metalMat);
+    finV.position.z = -3.5;
+    hullGroup.add(finV);
+    const finH = finV.clone();
+    finH.rotation.z = Math.PI / 2;
+    hullGroup.add(finH);
+
+    // Śmigła (boczne)
+    const propGroup = new THREE.Group();
+    const propBlade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.0, 0.2), metalMat);
+    propGroup.add(propBlade);
+    const propLeft = propGroup.clone(); propLeft.position.set(-2.2, 0, 0);
+    const propRight = propGroup.clone(); propRight.position.set(2.2, 0, 0);
+    hullGroup.add(propLeft, propRight);
+
+    ship.add(hullGroup);
+
+    // Działko (na dziobie gondoli)
+    const turretGroup = new THREE.Group();
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 2.5), metalMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = 1.25;
+    turretGroup.add(barrel);
+    turretGroup.position.set(0, -2.0, 2.0);
+    hullGroup.add(turretGroup);
+
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 1.25, 0);
+    barrel.add(barrelTip);
+
+    ship.hullGroup = hullGroup;
+    ship.turret = turretGroup;
+    ship.mantlet = new THREE.Group();
+    ship.barrel = barrel;
+    ship.barrelTip = barrelTip;
+    ship.exhaustPoint = propLeft; 
+    ship.props = [propLeft, propRight];
+
+    return ship;
+}
+
+/**
+ * Tworzy Drona "X-Type".
+ */
+export function createXDrone(color) {
+    const drone = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    const mat = LAMBERT_MATERIAL(color, 'droneMat');
+    const dark = LAMBERT_MATERIAL(0x111111, 'droneDark');
+
+    // Korpus centralny
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.8, 2.0), mat);
+    hullGroup.add(body);
+
+    // Ramiona X
+    const armGeom = new THREE.BoxGeometry(0.5, 0.2, 6.0);
+    const arm1 = new THREE.Mesh(armGeom, dark);
+    arm1.rotation.y = Math.PI / 4;
+    hullGroup.add(arm1);
+    const arm2 = new THREE.Mesh(armGeom, dark);
+    arm2.rotation.y = -Math.PI / 4;
+    hullGroup.add(arm2);
+
+    // Wirniki na końcach
+    const rotorGeom = new THREE.CylinderGeometry(0.8, 0.8, 0.1, 8);
+    const rotors = [];
+    [ {x: 2, z: 2}, {x: -2, z: -2}, {x: 2, z: -2}, {x: -2, z: 2} ].forEach(pos => {
+        const r = new THREE.Mesh(rotorGeom, LAMBERT_MATERIAL(0x00ffff, 'droneRotor')); // Neonowe
+        r.position.set(pos.x, 0.2, pos.z);
+        hullGroup.add(r);
+        rotors.push(r);
+    });
+
+    drone.add(hullGroup);
+
+    // Działko podwieszane
+    const turretGroup = new THREE.Group();
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 2.0), dark);
+    barrel.position.z = 1.0;
+    turretGroup.add(barrel);
+    turretGroup.position.y = -0.5;
+    hullGroup.add(turretGroup);
+
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 0, 1.0);
+    barrel.add(barrelTip);
+
+    drone.hullGroup = hullGroup;
+    drone.turret = turretGroup;
+    drone.mantlet = new THREE.Group();
+    drone.barrel = barrel;
+    drone.barrelTip = barrelTip;
+    drone.exhaustPoint = body;
+    drone.rotors = rotors;
+
+    return drone;
+}
+
+/**
+ * Tworzy "Void Glider" (Pustynny Ślizgacz).
+ */
+export function createVoidGlider(color) {
+    const glider = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    const mat = LAMBERT_MATERIAL(0x330033, 'voidMat'); // Ciemny fiolet
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xaa00aa });
+
+    // Trójkątny kształt
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 4);
+    shape.lineTo(2.5, -2);
+    shape.lineTo(0, -1);
+    shape.lineTo(-2.5, -2);
+    shape.lineTo(0, 4);
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.y = 0.25;
+    hullGroup.add(mesh);
+
+    // Kryształ napędowy
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.8), glowMat);
+    crystal.position.set(0, 1.0, -1.0);
+    hullGroup.add(crystal);
+
+    glider.add(hullGroup);
+
+    // Działko - lewitująca kula
+    const turretGroup = new THREE.Group();
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.4), glowMat);
+    turretGroup.add(orb);
+    turretGroup.position.set(0, -0.5, 3.0);
+    hullGroup.add(turretGroup);
+
+    const barrel = new THREE.Object3D(); // Niewidzialna lufa
+    barrel.position.z = 1.0;
+    turretGroup.add(barrel);
+    
+    const barrelTip = new THREE.Object3D();
+    barrel.add(barrelTip);
+
+    glider.hullGroup = hullGroup;
+    glider.turret = turretGroup;
+    glider.mantlet = new THREE.Group();
+    glider.barrel = barrel;
+    glider.barrelTip = barrelTip;
+    glider.exhaustPoint = crystal;
+    glider.crystal = crystal;
+
+    return glider;
+}
+
+/**
+ * Tworzy "Ważkę" (Dragonfly Gunship).
+ */
+export function createDragonfly(color) {
+    const fly = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    const bodyMat = LAMBERT_MATERIAL(color, 'dragonBody');
+    const wingMat = new THREE.MeshPhongMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+
+    // Ciało - cienkie i długie
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 6.0, 4, 8), bodyMat);
+    body.rotation.x = Math.PI / 2;
+    hullGroup.add(body);
+
+    // Głowa
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.9), LAMBERT_MATERIAL(0x000000, 'dragonEyes'));
+    head.position.z = 3.2;
+    hullGroup.add(head);
+
+    // Skrzydła (4 sztuki)
+    const wingGeom = new THREE.PlaneGeometry(5.0, 1.0);
+    const wings = [];
+    
+    const w1 = new THREE.Mesh(wingGeom, wingMat); w1.position.set(2.5, 0.5, 1.5);
+    const w2 = new THREE.Mesh(wingGeom, wingMat); w2.position.set(-2.5, 0.5, 1.5);
+    const w3 = new THREE.Mesh(wingGeom, wingMat); w3.position.set(2.5, 0.5, -0.5);
+    const w4 = new THREE.Mesh(wingGeom, wingMat); w4.position.set(-2.5, 0.5, -0.5);
+    
+    hullGroup.add(w1, w2, w3, w4);
+    wings.push(w1, w2, w3, w4);
+
+    fly.add(hullGroup);
+
+    // Działko pod głową
+    const turretGroup = new THREE.Group();
+    const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.0), LAMBERT_MATERIAL(0x333333, 'dragonGun'));
+    gun.rotation.x = Math.PI / 2;
+    gun.position.z = 1.0;
+    turretGroup.add(gun);
+    turretGroup.position.set(0, -0.8, 2.5);
+    hullGroup.add(turretGroup);
+
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 1.0, 0);
+    gun.add(barrelTip);
+
+    fly.hullGroup = hullGroup;
+    fly.turret = turretGroup;
+    fly.mantlet = new THREE.Group();
+    fly.barrel = gun;
+    fly.barrelTip = barrelTip;
+    fly.exhaustPoint = new THREE.Object3D();
+    fly.wings = wings;
+
+    return fly;
+}
+
+/**
+ * Tworzy Sześcian Bojowy (The Brick).
+ */
+export function createBattleCube(color) {
+    const cube = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    const mat = LAMBERT_MATERIAL(color, 'cubeMat');
+    const detailMat = LAMBERT_MATERIAL(0x222222, 'cubeDetail');
+
+    // Główny sześcian
+    const box = new THREE.Mesh(new THREE.BoxGeometry(4.0, 4.0, 4.0), mat);
+    hullGroup.add(box);
+
+    // Detale (małe sześciany na rogach)
+    const smallBoxGeom = new THREE.BoxGeometry(1.0, 1.0, 1.0);
+    const positions = [
+        [2,2,2], [2,2,-2], [2,-2,2], [2,-2,-2],
+        [-2,2,2], [-2,2,-2], [-2,-2,2], [-2,-2,-2]
+    ];
+    positions.forEach(p => {
+        const b = new THREE.Mesh(smallBoxGeom, detailMat);
+        b.position.set(...p);
+        hullGroup.add(b);
+    });
+
+    cube.add(hullGroup);
+
+    // Działko - oko na środku
+    const turretGroup = new THREE.Group();
+    const eye = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 0.5, 1.0, 4), LAMBERT_MATERIAL(0xff0000, 'cubeEye'));
+    eye.rotation.x = -Math.PI / 2;
+    turretGroup.add(eye);
+    
+    // Lufa w oku
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 3.0), detailMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = 1.5;
+    turretGroup.add(barrel);
+
+    turretGroup.position.z = 2.0;
+    hullGroup.add(turretGroup);
+
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 1.5, 0);
+    barrel.add(barrelTip);
+
+    cube.hullGroup = hullGroup;
+    cube.turret = turretGroup;
+    cube.mantlet = new THREE.Group();
+    cube.barrel = barrel;
+    cube.barrelTip = barrelTip;
+    cube.exhaustPoint = new THREE.Object3D();
+
+    return cube;
+}

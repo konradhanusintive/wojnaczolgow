@@ -75,6 +75,12 @@ const TANKS_DATA = {
   k2blackpanther: { name: "K2 Black Panther (Korea Południowa)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, startY: 1.5, hullWidth: 6.8 },
   rooikat: { name: "Rooikat (RPA)", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, startY: 0.8, hullWidth: 3.5 }, // Rooikat to pojazd kołowy, niski Y
   helicopter: { name: "AH-64 Apache (USA)", stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 }, startY: 15.0, hullWidth: 4.0, isFlying: true },
+  ufo: { name: "Latający Spodek (Nieznany)", stats: { hp: 50, damage: 1.5, speed: 25, turretRot: 3.0 }, startY: 20.0, hullWidth: 4.5, isFlying: true },
+  ironwhale: { name: "Żelazny Wieloryb (Steampunk)", stats: { hp: 150, damage: 1.3, speed: 12, turretRot: 1.0 }, startY: 30.0, hullWidth: 5.0, isFlying: true },
+  xdrone: { name: "X-Drone (Cyberpunk)", stats: { hp: 40, damage: 0.9, speed: 28, turretRot: 4.0 }, startY: 10.0, hullWidth: 2.5, isFlying: true },
+  voidglider: { name: "Pustynny Ślizgacz (Obcy)", stats: { hp: 65, damage: 1.4, speed: 24, turretRot: 2.0 }, startY: 12.0, hullWidth: 3.5, isFlying: true },
+  dragonfly: { name: "Ważka (Bio-Mech)", stats: { hp: 55, damage: 1.1, speed: 26, turretRot: 2.2 }, startY: 15.0, hullWidth: 3.0, isFlying: true },
+  battlecube: { name: "Sześcian Bojowy (Abstrakcja)", stats: { hp: 180, damage: 1.6, speed: 10, turretRot: 0.5 }, startY: 40.0, hullWidth: 6.0, isFlying: true },
 };
 
 const WEAPONS_DATA = {
