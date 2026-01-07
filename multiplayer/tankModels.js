@@ -1738,6 +1738,178 @@ export function createUFO(color) {
 }
 
 /**
+ * Tworzy Żołnierza (Piechota).
+ * Bardzo mały, trudny do trafienia.
+ */
+export function createSoldier(color) {
+    const soldier = new THREE.Group();
+    const material = LAMBERT_MATERIAL(color, 'soldierUniform');
+    const skinMat = LAMBERT_MATERIAL(0xffccaa, 'soldierSkin');
+    const gunMat = LAMBERT_MATERIAL(0x111111, 'soldierGun');
+
+    // Ciało
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.6, 4, 8), material);
+    body.position.y = 0.55;
+    soldier.add(body);
+
+    // Głowa
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2), skinMat);
+    head.position.y = 1.0;
+    soldier.add(head);
+
+    // Hełm
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2), material);
+    helmet.position.y = 1.05;
+    soldier.add(helmet);
+
+    // Ręce (do animacji)
+    const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.6), material);
+    leftArm.position.set(-0.35, 0.7, 0);
+    leftArm.rotation.z = 0.2;
+    soldier.add(leftArm);
+
+    const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.6), material);
+    rightArm.position.set(0.35, 0.7, 0.2); // Wyciągnięta do przodu
+    rightArm.rotation.x = -Math.PI / 2;
+    soldier.add(rightArm);
+
+    // Nogi (do animacji)
+    const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.7), material);
+    leftLeg.position.set(-0.15, 0.35, 0);
+    soldier.add(leftLeg);
+
+    const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.7), material);
+    rightLeg.position.set(0.15, 0.35, 0);
+    soldier.add(rightLeg);
+
+    // Karabin
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.8), gunMat);
+    gun.position.set(0.35, 0.7, 0.6);
+    soldier.add(gun);
+
+    // Punkt wylotu
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 0, 0.4);
+    gun.add(barrelTip);
+
+    soldier.hullGroup = soldier; // Cały żołnierz to hull
+    soldier.turret = new THREE.Group(); // Atrapa
+    soldier.mantlet = new THREE.Group();
+    soldier.barrel = gun;
+    soldier.barrelTip = barrelTip;
+    soldier.exhaustPoint = new THREE.Object3D();
+    
+    // Referencje do animacji
+    soldier.leftLeg = leftLeg;
+    soldier.rightLeg = rightLeg;
+    soldier.rightArm = rightArm;
+
+    return soldier;
+}
+
+/**
+ * Tworzy Mecha Kroczącego (Titan Walker).
+ */
+export function createMechWalker(color) {
+    const mech = new THREE.Group();
+    const hullGroup = new THREE.Group(); // To będzie korpus, który się obraca
+    const legsGroup = new THREE.Group(); // Nogi są oddzielnie
+    
+    const armorMat = LAMBERT_MATERIAL(color, 'mechArmor');
+    const jointMat = LAMBERT_MATERIAL(0x333333, 'mechJoint');
+    const glassMat = new THREE.MeshPhongMaterial({ color: 0xffaa00, shininess: 100 }); // Złota szyba
+
+    // --- NOGI (Statyczna baza względem rotacji wieży, ale animowana względem ruchu) ---
+    // Stawy biodrowe
+    const hip = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.5, 1.5), jointMat);
+    hip.position.y = 3.0;
+    legsGroup.add(hip);
+
+    // Lewa Noga
+    const leftLegGroup = new THREE.Group();
+    leftLegGroup.position.set(-1.5, 3.0, 0);
+    const upperLegL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.0, 1.0), armorMat);
+    upperLegL.position.y = -1.0;
+    leftLegGroup.add(upperLegL);
+    const lowerLegL = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.0, 1.2), armorMat);
+    lowerLegL.position.set(0, -2.5, 0.5); // Kolano zgięte
+    leftLegGroup.add(lowerLegL);
+    legsGroup.add(leftLegGroup);
+
+    // Prawa Noga
+    const rightLegGroup = new THREE.Group();
+    rightLegGroup.position.set(1.5, 3.0, 0);
+    const upperLegR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.0, 1.0), armorMat);
+    upperLegR.position.y = -1.0;
+    rightLegGroup.add(upperLegR);
+    const lowerLegR = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.0, 1.2), armorMat);
+    lowerLegR.position.set(0, -2.5, 0.5);
+    rightLegGroup.add(lowerLegR);
+    legsGroup.add(rightLegGroup);
+
+    mech.add(legsGroup);
+
+    // --- KORPUS (Działa jak wieża czołgu) ---
+    // Kokpit
+    const torsoGeom = new THREE.BoxGeometry(2.5, 2.5, 3.0);
+    const torso = new THREE.Mesh(torsoGeom, armorMat);
+    torso.position.y = 1.5; // Powyżej bioder
+    hullGroup.add(torso);
+
+    const cockpitWindow = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.0, 0.2), glassMat);
+    cockpitWindow.position.set(0, 1.8, 1.51);
+    hullGroup.add(cockpitWindow);
+
+    // Ramiona z bronią
+    // Lewe ramię - Działko obrotowe
+    const leftArm = new THREE.Group();
+    leftArm.position.set(-1.8, 1.5, 0.5);
+    const minigun = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 3.0), jointMat);
+    minigun.rotation.x = Math.PI / 2;
+    minigun.position.z = 1.5;
+    leftArm.add(minigun);
+    hullGroup.add(leftArm);
+
+    // Prawe ramię - Wyrzutnia rakiet
+    const rightArm = new THREE.Group();
+    rightArm.position.set(1.8, 1.5, 0.5);
+    const launcher = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 2.5), jointMat);
+    launcher.position.z = 1.0;
+    rightArm.add(launcher);
+    hullGroup.add(rightArm);
+
+    // Główna lufa (system celowania używa jej pozycji)
+    const aimBarrel = new THREE.Object3D();
+    aimBarrel.position.set(0, 1.5, 2.0); // Środek
+    hullGroup.add(aimBarrel);
+
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 0, 2.0);
+    aimBarrel.add(barrelTip);
+
+    hullGroup.position.y = 3.0; // Osadzenie na biodrach
+    mech.add(hullGroup);
+
+    // Konfiguracja dla systemu gry
+    // W przypadku mecha: hullGroup to tak naprawdę "wieża" (obraca się cała góra)
+    // A nogi to "podwozie". Musimy to nieco oszukać w logice.
+    
+    mech.hullGroup = legsGroup; // Nogi obracają się z klawiszami A/D (podwozie)
+    mech.turret = hullGroup;    // Korpus obraca się myszką
+    mech.mantlet = new THREE.Group(); // Brak mantletu
+    mech.barrel = aimBarrel;
+    mech.barrelTip = barrelTip;
+    mech.exhaustPoint = new THREE.Object3D();
+    
+    // Animacje
+    mech.leftLeg = leftLegGroup;
+    mech.rightLeg = rightLegGroup;
+
+    return mech;
+}
+
+
+/**
  * Tworzy Zeppelin "Iron Whale".
  */
 export function createIronWhale(color) {

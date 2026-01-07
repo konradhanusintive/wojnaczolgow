@@ -49,48 +49,83 @@ const PINE_TREE_COUNT = 800;
 const TREE_COLLISION_RADIUS = 1.5;
 const LARGE_ROCK_COUNT = 30;
 
-const TANKS_DATA = {
-  // Istniejące czołgi (standard to teraz M4 Sherman)
-  pl01: { name: "PL-01 Concept (Polska)", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0 },
-  abrams: { name: "M1 Abrams (USA)", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3, hullWidth: 6.5 },
-  standard: { name: "M4 Sherman (USA)", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25, hullWidth: 5.5 },
-  
-  // Nowe czołgi
-  tigerI: { name: "Tiger I (Niemcy)", stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, startY: 1.5, hullWidth: 7.0 },
-  t3485: { name: "T-34-85 (ZSRR)", stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, startY: 1.1, hullWidth: 5.0 },
-  cromwell: { name: "Cromwell (Wielka Brytania)", stats: { hp: 90, damage: 0.9, speed: 20, turretRot: 1.9 }, startY: 1.0, hullWidth: 4.8 },
-  amx1375: { name: "AMX 13 75 (Francja)", stats: { hp: 80, damage: 0.95, speed: 22, turretRot: 2.0 }, startY: 0.8, hullWidth: 4.0 },
-  type59: { name: "Type 59 (Chiny)", stats: { hp: 110, damage: 1.1, speed: 14, turretRot: 1.3 }, startY: 1.2, hullWidth: 5.8 },
-  chiha: { name: "Chi-Ha (Japonia)", stats: { hp: 70, damage: 0.8, speed: 12, turretRot: 1.4 }, startY: 0.9, hullWidth: 4.5 },
-  strv103b: { name: "Strv 103B (Szwecja)", stats: { hp: 120, damage: 1.3, speed: 17, turretRot: 0.0 }, startY: 0.8, hullWidth: 6.0 }, // Strv 103B bez obrotu wieży
-  p40: { name: "P40 (Włochy)", stats: { hp: 95, damage: 0.9, speed: 13, turretRot: 1.4 }, startY: 1.1, hullWidth: 5.2 },
-  skodaT25: { name: "Škoda T 25 (Czechosłowacja)", stats: { hp: 90, damage: 1.0, speed: 18, turretRot: 1.7 }, startY: 1.1, hullWidth: 4.8 },
-  ramII: { name: "Ram II (Kanada)", stats: { hp: 100, damage: 0.95, speed: 14, turretRot: 1.5 }, startY: 1.3, hullWidth: 5.6 },
-  sentinelAC1: { name: "Sentinel AC 1 (Australia)", stats: { hp: 100, damage: 0.98, speed: 13, turretRot: 1.4 }, startY: 1.2, hullWidth: 5.3 },
-  turanIII: { name: "Turán III (Węgry)", stats: { hp: 88, damage: 0.85, speed: 11, turretRot: 1.3 }, startY: 1.0, hullWidth: 5.0 },
-  bt42: { name: "BT-42 (Finlandia)", stats: { hp: 80, damage: 1.1, speed: 20, turretRot: 1.5 }, startY: 0.9, hullWidth: 4.2 },
-  shotkaldalet: { name: "Shot Kal Dalet (Izrael)", stats: { hp: 125, damage: 1.15, speed: 12, turretRot: 1.1 }, startY: 1.3, hullWidth: 6.0 },
-  nahueldl43: { name: "Nahuel DL 43 (Argentyna)", stats: { hp: 98, damage: 1.0, speed: 14, turretRot: 1.4 }, startY: 1.2, hullWidth: 5.5 },
-  chonmaho: { name: "Ch'ŏnma-ho (Korea Północna)", stats: { hp: 115, damage: 1.1, speed: 15, turretRot: 1.3 }, startY: 1.1, hullWidth: 6.0 },
-  k2blackpanther: { name: "K2 Black Panther (Korea Południowa)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, startY: 1.5, hullWidth: 6.8 },
-  rooikat: { name: "Rooikat (RPA)", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, startY: 0.8, hullWidth: 3.5 }, // Rooikat to pojazd kołowy, niski Y
-  helicopter: { name: "AH-64 Apache (USA)", stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 }, startY: 15.0, hullWidth: 4.0, isFlying: true },
-  ufo: { name: "Latający Spodek (Nieznany)", stats: { hp: 50, damage: 1.5, speed: 25, turretRot: 3.0 }, startY: 20.0, hullWidth: 4.5, isFlying: true },
-  ironwhale: { name: "Żelazny Wieloryb (Steampunk)", stats: { hp: 150, damage: 1.3, speed: 12, turretRot: 1.0 }, startY: 30.0, hullWidth: 5.0, isFlying: true },
-  xdrone: { name: "X-Drone (Cyberpunk)", stats: { hp: 40, damage: 0.9, speed: 28, turretRot: 4.0 }, startY: 10.0, hullWidth: 2.5, isFlying: true },
-  voidglider: { name: "Pustynny Ślizgacz (Obcy)", stats: { hp: 65, damage: 1.4, speed: 24, turretRot: 2.0 }, startY: 12.0, hullWidth: 3.5, isFlying: true },
-  dragonfly: { name: "Ważka (Bio-Mech)", stats: { hp: 55, damage: 1.1, speed: 26, turretRot: 2.2 }, startY: 15.0, hullWidth: 3.0, isFlying: true },
-  battlecube: { name: "Sześcian Bojowy (Abstrakcja)", stats: { hp: 180, damage: 1.6, speed: 10, turretRot: 0.5 }, startY: 40.0, hullWidth: 6.0, isFlying: true },
+const WEAPONS_DATA = {
+    // --- BASIC WEAPONS ---
+    basic_shell: { id: 'basic_shell', name: 'Pocisk Standardowy', damage: 25, velocity: 140, blastRadius: 8, type: 'projectile', impulse: 15, recoilImpulse: 10, color: 0xffaa00, cooldown: 0.8 },
+    machine_gun: { id: 'machine_gun', name: 'Karabin Maszynowy', damage: 4, velocity: 220, blastRadius: 0, type: 'machineGunBullet', impulse: 2, recoilImpulse: 1, color: 0xffff00, cooldown: 0.1 },
+    
+    // --- SPECIAL: PROJECTILES ---
+    ap_fsds:     { id: 'ap_fsds', name: 'APFSDS (Przebijający)', damage: 45, velocity: 250, blastRadius: 0, type: 'projectile', impulse: 30, recoilImpulse: 20, color: 0xcccccc, cooldown: 1.5 },
+    he_heavy:    { id: 'he_heavy', name: 'HE Heavy (Burzący)', damage: 60, velocity: 100, blastRadius: 20, type: 'projectile', impulse: 40, recoilImpulse: 30, color: 0xff4400, cooldown: 2.5 },
+    plasma_orb:  { id: 'plasma_orb', name: 'Kula Plazmy', damage: 70, velocity: 110, blastRadius: 15, type: 'projectile', impulse: 10, recoilImpulse: 5, color: 0x00ff00, visual: 'orb', cooldown: 2.0 },
+    sonic_boom:  { id: 'sonic_boom', name: 'Fala Soniczna', damage: 15, velocity: 180, blastRadius: 25, type: 'projectile', impulse: 80, recoilImpulse: 10, color: 0xaaaaff, visual: 'wave', cooldown: 1.2 }, // Duży odrzut
+    
+    // --- SPECIAL: BEAMS & LASERS ---
+    laser_red:   { id: 'laser_red', name: 'Czerwony Laser', damage: 35, velocity: 400, blastRadius: 0, type: 'projectile', impulse: 5, recoilImpulse: 0, color: 0xff0000, visual: 'beam', cooldown: 0.6 },
+    railgun:     { id: 'railgun', name: 'Railgun', damage: 90, velocity: 600, blastRadius: 2, type: 'projectile', impulse: 50, recoilImpulse: 40, color: 0x00ffff, visual: 'beam_thick', cooldown: 4.0 },
+    
+    // --- SPECIAL: MISSILES & ROCKETS ---
+    guided_m:    { id: 'guided_m', name: 'Rakieta Kierowana', damage: 55, velocity: 90, blastRadius: 10, type: 'missile', lifespan: 10.0, impulse: 20, recoilImpulse: 5, cooldown: 3.0 },
+    rocket_salvo:{ id: 'rocket_salvo', name: 'Salwa Rakietowa', damage: 20, velocity: 150, blastRadius: 8, type: 'projectile', impulse: 10, recoilImpulse: 5, color: 0x888888, cooldown: 0.2 }, // Szybkie strzelanie
+    
+    // --- SPECIAL: AOE / STATUS ---
+    napalm:      { id: 'napalm', name: 'Napalm', damage: 10, velocity: 80, blastRadius: 18, type: 'projectile', impulse: 5, recoilImpulse: 10, color: 0xff6600, visual: 'fire', cooldown: 3.0 }, // Podpala teren
+    emp_blast:   { id: 'emp_blast', name: 'Impuls EMP', damage: 5, velocity: 160, blastRadius: 30, type: 'projectile', effectDuration: 6.0, impulse: 5, recoilImpulse: 5, color: 0x0000ff, visual: 'shock', cooldown: 5.0 },
+    heal_nades:  { id: 'heal_nades', name: 'Nanoboty Naprawcze', damage: -30, velocity: 100, blastRadius: 12, type: 'projectile', impulse: 0, recoilImpulse: 5, color: 0x00ff88, visual: 'sparkle', cooldown: 4.0 }, // Leczy
 };
 
-const WEAPONS_DATA = {
-    he:     { id: 'he',     name: 'Odłamkowo-Burzący',  damage: 25, velocity: 140, blastRadius: 12, type: 'projectile', impulse: 15, recoilImpulse: 10 },
-    ap:     { id: 'ap',     name: 'Przeciwpancerny',     damage: 40, velocity: 220, blastRadius: 0,  type: 'projectile', impulse: 25, recoilImpulse: 15 },
-    heat:   { id: 'heat',   name: 'Kumulacyjny',         damage: 55, velocity: 160, blastRadius: 0,  type: 'projectile', impulse: 20, recoilImpulse: 18 },
-    emp:    { id: 'emp',    name: 'EMP',                 damage: 0,  velocity: 150, blastRadius: 8,  type: 'projectile', effectDuration: 4.0, impulse: 5, recoilImpulse: 5 },
-    smoke:  { id: 'smoke',  name: 'Dymny',               damage: 0,  velocity: 100, blastRadius: 15, type: 'projectile', impulse: 2, recoilImpulse: 3 },
-    guided: { id: 'guided', name: 'Naprowadzany',        damage: 45, velocity: 100, blastRadius: 3,  type: 'missile', lifespan: 10.0, impulse: 18, recoilImpulse: 8 }
+const TANKS_DATA = {
+  // --- CZOLGI ---
+  abrams: { 
+      name: "M1 Abrams (USA)", stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, startY: 1.3, hullWidth: 6.5,
+      weapons: ['basic_shell', 'machine_gun', 'ap_fsds', 'guided_m', 'smoke', 'he_heavy']
+  },
+  t3485: { 
+      name: "T-34-85 (ZSRR)", stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, startY: 1.1, hullWidth: 5.0,
+      weapons: ['basic_shell', 'machine_gun', 'he_heavy', 'napalm', 'smoke', 'rocket_salvo']
+  },
+  k2blackpanther: { 
+      name: "K2 Black Panther (Korea)", stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, startY: 1.5, hullWidth: 6.8,
+      weapons: ['basic_shell', 'machine_gun', 'ap_fsds', 'guided_m', 'emp_blast', 'laser_red']
+  },
+  
+  // --- POJAZDY LATAJĄCE ---
+  helicopter: { 
+      name: "AH-64 Apache (USA)", stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 }, startY: 15.0, hullWidth: 4.0, isFlying: true,
+      weapons: ['machine_gun', 'rocket_salvo', 'guided_m', 'napalm', 'smoke', 'ap_fsds']
+  },
+  ufo: { 
+      name: "Latający Spodek", stats: { hp: 50, damage: 1.5, speed: 25, turretRot: 3.0 }, startY: 20.0, hullWidth: 4.5, isFlying: true,
+      weapons: ['plasma_orb', 'laser_red', 'emp_blast', 'sonic_boom', 'heal_nades', 'guided_m'] // Kosmiczne bronie
+  },
+  xdrone: { 
+      name: "X-Drone", stats: { hp: 40, damage: 0.9, speed: 28, turretRot: 4.0 }, startY: 10.0, hullWidth: 2.5, isFlying: true,
+      weapons: ['laser_red', 'emp_blast', 'sonic_boom', 'smoke', 'machine_gun', 'guided_m']
+  },
+  
+  // --- NOWE JEDNOSTKI ---
+  soldier: {
+      name: "Piechur (Komandos)", stats: { hp: 25, damage: 0.8, speed: 8, turretRot: 5.0 }, startY: 0.5, hullWidth: 1.0, isWalker: true,
+      weapons: ['machine_gun', 'guided_m', 'heal_nades', 'smoke', 'laser_red', 'ap_fsds'] // Zwinny, leczy
+  },
+  mech: {
+      name: "Tytan Kroczący", stats: { hp: 250, damage: 1.8, speed: 7, turretRot: 0.8 }, startY: 3.0, hullWidth: 5.0, isWalker: true,
+      weapons: ['machine_gun', 'rocket_salvo', 'railgun', 'he_heavy', 'sonic_boom', 'plasma_orb'] // Ciężki sprzęt
+  },
+  
+  // --- POZOSTAŁE (Domyślny zestaw) ---
+  standard: { name: "M4 Sherman", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, startY: 1.25, hullWidth: 5.5, weapons: ['basic_shell', 'machine_gun', 'he_heavy', 'smoke', 'ap_fsds', 'guided_m'] },
+  pl01: { name: "PL-01", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, startY: 1.0, hullWidth: 6.0, weapons: ['basic_shell', 'laser_red', 'stealth_mode', 'guided_m', 'smoke', 'ap_fsds'] }, // TODO: stealth logic later
+  tigerI: { name: "Tiger I", stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, startY: 1.5, hullWidth: 7.0, weapons: ['basic_shell', 'machine_gun', 'he_heavy', 'ap_fsds', 'smoke', 'rocket_salvo'] },
+  // Domyślny fallback dla reszty
 };
+
+// Fallback function to get weapon list
+function getTankWeapons(type) {
+    if (TANKS_DATA[type] && TANKS_DATA[type].weapons) return TANKS_DATA[type].weapons;
+    return ['basic_shell', 'machine_gun', 'he_heavy', 'ap_fsds', 'smoke', 'guided_m'];
+}
+
 
 const gameState = {
   players: {},
@@ -1068,6 +1103,15 @@ io.on("connection", (socket) => {
     const startPos = { x: spawnPoint.x * (MAP_SIZE / 2), y: 0, z: spawnPoint.z * (MAP_SIZE / 2) };
     startPos.y = getHeightAt(startPos.x, startPos.z) + tankData.startY;
 
+    // Initialize ammo for loadout
+    const initialAmmo = {};
+    const weaponList = getTankWeapons(tankType);
+    weaponList.forEach(w => {
+        initialAmmo[w] = 20; // Default ammo count
+        if (w === 'machine_gun') initialAmmo[w] = 200;
+        if (w === 'rocket_salvo') initialAmmo[w] = 50;
+    });
+
     gameState.players[socket.id] = {
       id: socket.id, tankType: tankType, position: startPos, 
       rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 }, 
@@ -1080,8 +1124,9 @@ io.on("connection", (socket) => {
       lastTrackPos: { ...startPos },
       activePowerUp: null, powerUpTimer: 0, powerUpAmmo: 0,
       isEmpDisabled: false, empDisableTimer: 0,
-      currentWeapon: 'he',
-      ammo: { he: 10, ap: 10, heat: 5, emp: 3, smoke: 3, guided: 2 },
+      currentWeapon: weaponList[0], // First weapon is default
+      weapons: weaponList, // Store allowed weapons
+      ammo: initialAmmo,
       laserData: { enabled: true, start: { x: 0, y: 0, z: 0 }, end: { x: 0, y: 0, z: 0 } }
     };
     
@@ -1089,7 +1134,9 @@ io.on("connection", (socket) => {
         playerId: socket.id, initialState: gameState,
         spawnPoints: SPAWN_POINTS.map(p => ({ x: p.x * MAP_SIZE / 2, z: p.z * MAP_SIZE / 2 })),
         heightMap: heightMap,
-        terrainParams: { size: MAP_SIZE, segments: TERRAIN_SEGMENTS, amplitude: TERRAIN_AMPLITUDE, sandyAreaRadius: SANDY_AREA_RADIUS, mudBorderWidth: MUD_BORDER_WIDTH }
+        terrainParams: { size: MAP_SIZE, segments: TERRAIN_SEGMENTS, amplitude: TERRAIN_AMPLITUDE, sandyAreaRadius: SANDY_AREA_RADIUS, mudBorderWidth: MUD_BORDER_WIDTH },
+        weaponsData: WEAPONS_DATA, // Send weapon definitions to client
+        tanksData: TANKS_DATA // Send tank definitions to client
     });
     
     socket.broadcast.emit("playerConnected", gameState.players[socket.id]);

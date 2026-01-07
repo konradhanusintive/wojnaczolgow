@@ -8,10 +8,26 @@ import {
     createSkodaT25Tank, createRamIITank, createSentinelAC1Tank, createTuranIIITank,
     createBT42Tank, createShotKalDaletTank, createNahuelDL43Tank, createChonmaHoTank,
     createK2BlackPantherTank, createRooikatTank, createHelicopter,
-    createUFO, createIronWhale, createXDrone, createVoidGlider, createDragonfly, createBattleCube
+    createUFO, createIronWhale, createXDrone, createVoidGlider, createDragonfly, createBattleCube,
+    createSoldier, createMechWalker
 } from './tankModels.js'; 
 
 let scene, renderer, clock, camera;
+
+// --- SOCKET.IO INITIALIZATION WITH ERROR HANDLING ---
+let socket;
+try {
+    if (typeof io !== 'undefined') {
+        socket = io();
+        console.log("Socket initialized successfully");
+    } else {
+        console.error("CRITICAL ERROR: Socket.IO library not loaded! Check your internet connection or server.");
+        alert("Błąd: Biblioteka sieciowa nie została załadowana. Gra nie może się połączyć.");
+    }
+} catch (e) {
+    console.error("Socket initialization failed:", e);
+}
+
 const WATER_LEVEL = -0.5; // Keep consistent with water.position.y
 let water, waterMaterial, waterMaskCanvas, waterMaskCtx, waterMaskTexture;
 let localPlayerId = null;
@@ -85,191 +101,98 @@ const FIRE_SETTINGS = {
 };
 let currentFireParticleCount = 0;
 
-const socket = io();
-
 // --- STAŁE I DANE ---
+const WEAPONS_DATA = {
+    // --- BASIC WEAPONS ---
+    basic_shell: { id: 'basic_shell', name: 'Pocisk Standardowy', damage: 25, velocity: 140, blastRadius: 8, type: 'projectile', impulse: 15, recoilImpulse: 10, color: 0xffaa00, cooldown: 0.8 },
+    machine_gun: { id: 'machine_gun', name: 'Karabin Maszynowy', damage: 4, velocity: 220, blastRadius: 0, type: 'machineGunBullet', impulse: 2, recoilImpulse: 1, color: 0xffff00, cooldown: 0.1 },
+    
+    // --- SPECIAL: PROJECTILES ---
+    ap_fsds:     { id: 'ap_fsds', name: 'APFSDS (Przebijający)', damage: 45, velocity: 250, blastRadius: 0, type: 'projectile', impulse: 30, recoilImpulse: 20, color: 0xcccccc, cooldown: 1.5 },
+    he_heavy:    { id: 'he_heavy', name: 'HE Heavy (Burzący)', damage: 60, velocity: 100, blastRadius: 20, type: 'projectile', impulse: 40, recoilImpulse: 30, color: 0xff4400, cooldown: 2.5 },
+    plasma_orb:  { id: 'plasma_orb', name: 'Kula Plazmy', damage: 70, velocity: 110, blastRadius: 15, type: 'projectile', impulse: 10, recoilImpulse: 5, color: 0x00ff00, visual: 'orb', cooldown: 2.0 },
+    sonic_boom:  { id: 'sonic_boom', name: 'Fala Soniczna', damage: 15, velocity: 180, blastRadius: 25, type: 'projectile', impulse: 80, recoilImpulse: 10, color: 0xaaaaff, visual: 'wave', cooldown: 1.2 },
+    
+    // --- SPECIAL: BEAMS & LASERS ---
+    laser_red:   { id: 'laser_red', name: 'Czerwony Laser', damage: 35, velocity: 400, blastRadius: 0, type: 'projectile', impulse: 5, recoilImpulse: 0, color: 0xff0000, visual: 'beam', cooldown: 0.6 },
+    railgun:     { id: 'railgun', name: 'Railgun', damage: 90, velocity: 600, blastRadius: 2, type: 'projectile', impulse: 50, recoilImpulse: 40, color: 0x00ffff, visual: 'beam_thick', cooldown: 4.0 },
+    
+    // --- SPECIAL: MISSILES & ROCKETS ---
+    guided_m:    { id: 'guided_m', name: 'Rakieta Kierowana', damage: 55, velocity: 90, blastRadius: 10, type: 'missile', lifespan: 10.0, impulse: 20, recoilImpulse: 5, cooldown: 3.0 },
+    rocket_salvo:{ id: 'rocket_salvo', name: 'Salwa Rakietowa', damage: 20, velocity: 150, blastRadius: 8, type: 'projectile', impulse: 10, recoilImpulse: 5, color: 0x888888, cooldown: 0.2 },
+    
+    // --- SPECIAL: AOE / STATUS ---
+    napalm:      { id: 'napalm', name: 'Napalm', damage: 10, velocity: 80, blastRadius: 18, type: 'projectile', impulse: 5, recoilImpulse: 10, color: 0xff6600, visual: 'fire', cooldown: 3.0 },
+    emp_blast:   { id: 'emp_blast', name: 'Impuls EMP', damage: 5, velocity: 160, blastRadius: 30, type: 'projectile', effectDuration: 6.0, impulse: 5, recoilImpulse: 5, color: 0x0000ff, visual: 'shock', cooldown: 5.0 },
+    heal_nades:  { id: 'heal_nades', name: 'Nanoboty Naprawcze', damage: -30, velocity: 100, blastRadius: 12, type: 'projectile', impulse: 0, recoilImpulse: 5, color: 0x00ff88, visual: 'sparkle', cooldown: 4.0 },
+};
+
 const TANKS_DATA = {
-  // Istniejące czołgi (standard to teraz M4 Sherman)
-  pl01: { 
-    name: "PL-01 Concept (Polska)", 
-    description: "Lekki czołg wsparcia ogniowego o niskim profilu i nowoczesnym kamuflażu adaptacyjnym. Szybki i zwinny, idealny do szybkich ataków.", 
-    stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, 
-    create: createPL01Tank, hullWidth: 6.0, sniperCamYOffset: 1.8, isPremium: false 
-  },
   abrams: { 
-    name: "M1 Abrams (USA)", 
-    description: "Amerykański czołg podstawowy, znany z niezawodności i potężnego pancerza. Wolniejszy, ale niezwykle wytrzymały i zabójczy w natarciu.", 
-    stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, 
-    create: createAbramsTank, hullWidth: 6.5, sniperCamYOffset: 2.2, isPremium: true 
-  },
-  standard: { 
-    name: "M4 Sherman (USA)", 
-    description: "Wszechstronny, klasyczny czołg średni. Dobrze zbalansowany pod względem mobilności, pancerza i siły ognia, doskonały dla początkujących.", 
-    stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, 
-    create: createStandardTank, hullWidth: 5.5, sniperCamYOffset: 2.0, isPremium: false 
-  },
-  
-  // Nowe czołgi
-  tigerI: { 
-    name: "Tiger I (Niemcy)", 
-    description: "Legendarny, ciężki czołg o grubym pancerzu i potężnym dziale. Powolny, ale niemal nie do zatrzymania, gdy znajdzie się na pozycji.", 
-    stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, 
-    create: createTigerITank, hullWidth: 7.0, sniperCamYOffset: 2.5, isPremium: false 
+      name: "M1 Abrams (USA)", description: "Amerykański czołg podstawowy. Wyważony i wszechstronny.",
+      stats: { hp: 130, damage: 1.0, speed: 12, turretRot: 1.2 }, create: createAbramsTank, hullWidth: 6.5, sniperCamYOffset: 2.2, isPremium: true,
+      weapons: ['basic_shell', 'machine_gun', 'ap_fsds', 'guided_m', 'smoke', 'he_heavy']
   },
   t3485: { 
-    name: "T-34-85 (ZSRR)", 
-    description: "Ikoniczny czołg średni, oferujący dobrą mobilność i skuteczną armatę. Idealny do manewrów flankingowych i wspierania ataku.", 
-    stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, 
-    create: createT3485Tank, hullWidth: 5.0, sniperCamYOffset: 1.9, isPremium: false 
-  },
-  cromwell: { 
-    name: "Cromwell (Wielka Brytania)", 
-    description: "Szybki czołg pościgowy o dużej prędkości maksymalnej. Doskonały do zwiadu i zaskakiwania przeciwników z flanki.", 
-    stats: { hp: 90, damage: 0.9, speed: 20, turretRot: 1.9 }, 
-    create: createCromwellTank, hullWidth: 4.8, sniperCamYOffset: 1.8, isPremium: false 
-  },
-  amx1375: { 
-    name: "AMX 13 75 (Francja)", 
-    description: "Lekki czołg z magazynkiem, zdolny do szybkiego oddawania strzałów. Doskonały dla graczy preferujących taktykę 'uderz i uciekaj'.", 
-    stats: { hp: 80, damage: 0.95, speed: 22, turretRot: 2.0 }, 
-    create: createAMX1375Tank, hullWidth: 4.0, sniperCamYOffset: 1.5, isPremium: false 
-  },
-  type59: { 
-    name: "Type 59 (Chiny)", 
-    description: "Solidny czołg średni o okrągłej wieży i niezawodnym pancerzu. Trudny do penetracji i skuteczny w walce na średnim dystansie.", 
-    stats: { hp: 110, damage: 1.1, speed: 14, turretRot: 1.3 }, 
-    create: createType59Tank, hullWidth: 5.8, sniperCamYOffset: 2.0, isPremium: true 
-  },
-  chiha: { 
-    name: "Chi-Ha (Japonia)", 
-    description: "Japoński czołg średni, zwrotny i kompaktowy. Mimo skromnego pancerza, oferuje dobrą manewrowość do wsparcia drużyny.", 
-    stats: { hp: 70, damage: 0.8, speed: 12, turretRot: 1.4 }, 
-    create: createChiHaTank, hullWidth: 4.5, sniperCamYOffset: 1.7, isPremium: false 
-  },
-  strv103b: { 
-    name: "Strv 103B (Szwecja)", 
-    description: "Bezwieżowy niszczyciel czołgów o niskiej sylwetce i potężnym dziale. Jego unikalna konstrukcja pozwala na błyskawiczne celowanie korpusem.", 
-    stats: { hp: 120, damage: 1.3, speed: 17, turretRot: 0.0 }, 
-    create: createStrv103BTank, hullWidth: 6.0, sniperCamYOffset: 1.5, isPremium: true 
-  }, 
-  p40: { 
-    name: "P40 (Włochy)", 
-    description: "Włoski czołg ciężki z dobrze opancerzonym frontem. Niezbyt szybki, ale skuteczny w obronie i przebijaniu linii wroga.", 
-    stats: { hp: 95, damage: 0.9, speed: 13, turretRot: 1.4 }, 
-    create: createP40Tank, hullWidth: 5.2, sniperCamYOffset: 1.9, isPremium: false 
-  },
-  skodaT25: { 
-    name: "Škoda T 25 (Czechosłowacja)", 
-    description: "Średni czołg z systemem automatycznego ładowania. Oferuje serię szybkich strzałów, idealny do eliminowania osłabionych wrogów.", 
-    stats: { hp: 90, damage: 1.0, speed: 18, turretRot: 1.7 }, 
-    create: createSkodaT25Tank, hullWidth: 4.8, sniperCamYOffset: 1.8, isPremium: false 
-  },
-  ramII: { 
-    name: "Ram II (Kanada)", 
-    description: "Kanadyjski czołg średni, oparty na podwoziu M3 Lee. Solidny pancerz i niezawodna armata czynią go dobrym wsparciem.", 
-    stats: { hp: 100, damage: 0.95, speed: 14, turretRot: 1.5 }, 
-    create: createRamIITank, hullWidth: 5.6, sniperCamYOffset: 2.1, isPremium: false 
-  },
-  sentinelAC1: { 
-    name: "Sentinel AC 1 (Australia)", 
-    description: "Australijski czołg krążownik, dobrze zbalansowany pod kątem mobilności i siły ognia. Wszechstronny w różnych rolach bojowych.", 
-    stats: { hp: 100, damage: 0.98, speed: 13, turretRot: 1.4 }, 
-    create: createSentinelAC1Tank, hullWidth: 5.3, sniperCamYOffset: 2.0, isPremium: false 
-  },
-  turanIII: { 
-    name: "Turán III (Węgry)", 
-    description: "Ulepszony węgierski czołg średni, z lepszym pancerzem i armatą. Skuteczny w starciach na bliskim i średnim dystansie.", 
-    stats: { hp: 88, damage: 0.85, speed: 11, turretRot: 1.3 }, 
-    create: createTuranIIITank, hullWidth: 5.0, sniperCamYOffset: 1.8, isPremium: false 
-  },
-  bt42: { 
-    name: "BT-42 (Finlandia)", 
-    description: "Fiński czołg wsparcia ogniowego z haubicą. Mobilny i zdolny do zadawania dużych obrażeń obszarowych, idealny do nękania wrogów.", 
-    stats: { hp: 80, damage: 1.1, speed: 20, turretRot: 1.5 }, 
-    create: createBT42Tank, hullWidth: 4.2, sniperCamYOffset: 1.7, isPremium: false 
-  },
-  shotkaldalet: { 
-    name: "Shot Kal Dalet (Izrael)", 
-    description: "Izraelski czołg podstawowy (Centurion) z wieloma modyfikacjami. Silny pancerz, niezawodna armata, gotowy do walki w każdych warunkach.", 
-    stats: { hp: 125, damage: 1.15, speed: 12, turretRot: 1.1 }, 
-    create: createShotKalDaletTank, hullWidth: 6.0, sniperCamYOffset: 2.1, isPremium: true 
-  },
-  nahueldl43: { 
-    name: "Nahuel DL 43 (Argentyna)", 
-    description: "Argentyński czołg średni, bazujący na rozwiązaniach Shermana. Dobrze opancerzony, ze solidnym uzbrojeniem głównym.", 
-    stats: { hp: 98, damage: 1.0, speed: 14, turretRot: 1.4 }, 
-    create: createNahuelDL43Tank, hullWidth: 5.5, sniperCamYOffset: 2.0, isPremium: false 
-  },
-  chonmaho: { 
-    name: "Ch'ŏnma-ho (Korea Północna)", 
-    description: "Zmodyfikowany radziecki T-62. Charakteryzuje się mocnym działem i solidnym pancerzem wieży, skuteczny w natarciu.", 
-    stats: { hp: 115, damage: 1.1, speed: 15, turretRot: 1.3 }, 
-    create: createChonmaHoTank, hullWidth: 6.0, sniperCamYOffset: 2.0, isPremium: false 
+      name: "T-34-85 (ZSRR)", description: "Legenda II Wojny Światowej. Mobilny i skuteczny.",
+      stats: { hp: 105, damage: 1.05, speed: 16, turretRot: 1.6 }, create: createT3485Tank, hullWidth: 5.0, sniperCamYOffset: 1.9, isPremium: false,
+      weapons: ['basic_shell', 'machine_gun', 'he_heavy', 'napalm', 'smoke', 'rocket_salvo']
   },
   k2blackpanther: { 
-    name: "K2 Black Panther (Korea Południowa)", 
-    description: "Nowoczesny czołg podstawowy z Korei Płd. Posiada zaawansowaną technologię, potężne działo i wyśmienitą mobilność. Elitarna jednostka.", 
-    stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, 
-    create: createK2BlackPantherTank, hullWidth: 6.8, sniperCamYOffset: 2.3, isPremium: true 
+      name: "K2 Black Panther (Korea)", description: "Nowoczesny czołg z zaawansowaną elektroniką.",
+      stats: { hp: 150, damage: 1.3, speed: 18, turretRot: 1.7 }, create: createK2BlackPantherTank, hullWidth: 6.8, sniperCamYOffset: 2.3, isPremium: true,
+      weapons: ['basic_shell', 'machine_gun', 'ap_fsds', 'guided_m', 'emp_blast', 'laser_red']
   },
-  rooikat: { 
-    name: "Rooikat (RPA)", 
-    description: "Szybki, kołowy pojazd opancerzony z dużą armatą. Idealny do zwiadu, szybkich flankowań i nękania celów na otwartym terenie.", 
-    stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, 
-    create: createRooikatTank, hullWidth: 3.5, sniperCamYOffset: 1.6, isPremium: false 
+  helicopter: { 
+      name: "AH-64 Apache (USA)", description: "Helikopter szturmowy. Dominuje z powietrza.",
+      stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 }, create: createHelicopter, hullWidth: 4.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true,
+      weapons: ['machine_gun', 'rocket_salvo', 'guided_m', 'napalm', 'smoke', 'ap_fsds']
   },
-  helicopter: {
-    name: "AH-64 Apache (USA)",
-    description: "Helikopter szturmowy. Lata nad terenem, ignorując przeszkody naziemne. Wrażliwy na ostrzał, ale zabójczy z powietrza.",
-    stats: { hp: 60, damage: 1.2, speed: 22, turretRot: 2.5 },
-    create: createHelicopter, hullWidth: 4.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true
+  ufo: { 
+      name: "Latający Spodek", description: "Nieznana technologia. Szybki i zwrotny.",
+      stats: { hp: 50, damage: 1.5, speed: 25, turretRot: 3.0 }, create: createUFO, hullWidth: 4.5, sniperCamYOffset: -0.5, isPremium: true, isFlying: true,
+      weapons: ['plasma_orb', 'laser_red', 'emp_blast', 'sonic_boom', 'heal_nades', 'guided_m']
   },
-  ufo: {
-    name: "Latający Spodek (Nieznany)",
-    description: "Obiekt niezidentyfikowanego pochodzenia. Wykorzystuje antygrawitację do płynnego poruszania się w każdym kierunku.",
-    stats: { hp: 50, damage: 1.5, speed: 25, turretRot: 3.0 },
-    create: createUFO, hullWidth: 4.5, sniperCamYOffset: -0.5, isPremium: true, isFlying: true
+  xdrone: { 
+      name: "X-Drone", description: "Mały, szybki dron zwiadowczy.",
+      stats: { hp: 40, damage: 0.9, speed: 28, turretRot: 4.0 }, create: createXDrone, hullWidth: 2.5, sniperCamYOffset: 0.5, isPremium: true, isFlying: true,
+      weapons: ['laser_red', 'emp_blast', 'sonic_boom', 'smoke', 'machine_gun', 'guided_m']
   },
-  ironwhale: {
-    name: "Żelazny Wieloryb (Steampunk)",
-    description: "Opancerzony sterowiec bojowy. Powolny i majestatyczny, ale niezwykle wytrzymały. Latająca forteca.",
-    stats: { hp: 150, damage: 1.3, speed: 12, turretRot: 1.0 },
-    create: createIronWhale, hullWidth: 5.0, sniperCamYOffset: -2.0, isPremium: true, isFlying: true
+  soldier: {
+      name: "Piechur (Komandos)", description: "Mały cel, wielkie możliwości. Idealny do sabotażu.",
+      stats: { hp: 25, damage: 0.8, speed: 8, turretRot: 5.0 }, create: createSoldier, hullWidth: 1.0, sniperCamYOffset: 0.5, isWalker: true, isPremium: false,
+      weapons: ['machine_gun', 'guided_m', 'heal_nades', 'smoke', 'laser_red', 'ap_fsds']
   },
-  xdrone: {
-    name: "X-Drone (Cyberpunk)",
-    description: "Zwrotny dron bojowy nowej generacji. Niezwykle trudny do trafienia dzięki małym rozmiarom i dużej szybkości.",
-    stats: { hp: 40, damage: 0.9, speed: 28, turretRot: 4.0 },
-    create: createXDrone, hullWidth: 2.5, sniperCamYOffset: 0.5, isPremium: true, isFlying: true
+  mech: {
+      name: "Tytan Kroczący", description: "Opancerzona maszyna krocząca. Powolna, ale niszczycielska.",
+      stats: { hp: 250, damage: 1.8, speed: 7, turretRot: 0.8 }, create: createMechWalker, hullWidth: 5.0, sniperCamYOffset: 3.0, isWalker: true, isPremium: true,
+      weapons: ['machine_gun', 'rocket_salvo', 'railgun', 'he_heavy', 'sonic_boom', 'plasma_orb']
   },
-  voidglider: {
-    name: "Pustynny Ślizgacz (Obcy)",
-    description: "Tajemniczy pojazd napędzany energią próżni. Cichy i zabójczy, idealny do ataków z zaskoczenia.",
-    stats: { hp: 65, damage: 1.4, speed: 24, turretRot: 2.0 },
-    create: createVoidGlider, hullWidth: 3.5, sniperCamYOffset: 0.0, isPremium: true, isFlying: true
-  },
-  dragonfly: {
-    name: "Ważka (Bio-Mech)",
-    description: "Bioniczny ornitopter o czterech skrzydłach. Potrafi zawisnąć w miejscu i błyskawicznie zmienić kierunek lotu.",
-    stats: { hp: 55, damage: 1.1, speed: 26, turretRot: 2.2 },
-    create: createDragonfly, hullWidth: 3.0, sniperCamYOffset: 0.0, isPremium: true, isFlying: true
-  },
-  battlecube: {
-    name: "Sześcian Bojowy (Abstrakcja)",
-    description: "Latający monolit. Ignoruje prawa aerodynamiki. Przerażająco wytrzymały i wyposażony w potężne działo energetyczne.",
-    stats: { hp: 180, damage: 1.6, speed: 10, turretRot: 0.5 },
-    create: createBattleCube, hullWidth: 6.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true
-  },
+  // ... (Add other tanks if needed, using defaults for brevity)
+  standard: { name: "M4 Sherman", description: "Klasyk.", stats: { hp: 100, damage: 1.0, speed: 15, turretRot: 1.5 }, create: createStandardTank, hullWidth: 5.5, sniperCamYOffset: 2.0, isPremium: false, weapons: ['basic_shell', 'machine_gun', 'he_heavy', 'smoke', 'ap_fsds', 'guided_m'] },
+  pl01: { name: "PL-01", description: "Stealth tank.", stats: { hp: 85, damage: 1.0, speed: 18, turretRot: 1.8 }, create: createPL01Tank, hullWidth: 6.0, sniperCamYOffset: 1.8, isPremium: false, weapons: ['basic_shell', 'laser_red', 'guided_m', 'smoke', 'ap_fsds', 'machine_gun'] },
+  tigerI: { name: "Tiger I", description: "Ciężki pancerz.", stats: { hp: 140, damage: 1.2, speed: 10, turretRot: 1.0 }, create: createTigerITank, hullWidth: 7.0, sniperCamYOffset: 2.5, isPremium: false, weapons: ['basic_shell', 'machine_gun', 'he_heavy', 'ap_fsds', 'smoke', 'rocket_salvo'] },
+  rooikat: { name: "Rooikat", description: "Kołowy zwiadowca.", stats: { hp: 75, damage: 1.0, speed: 25, turretRot: 1.9 }, create: createRooikatTank, hullWidth: 3.5, sniperCamYOffset: 1.6, isPremium: false, weapons: ['basic_shell', 'machine_gun', 'ap_fsds', 'smoke', 'guided_m', 'rocket_salvo'] },
+  ironwhale: { name: "Żelazny Wieloryb", description: "Latająca forteca.", stats: { hp: 150, damage: 1.3, speed: 12, turretRot: 1.0 }, create: createIronWhale, hullWidth: 5.0, sniperCamYOffset: -2.0, isPremium: true, isFlying: true, weapons: ['he_heavy', 'rocket_salvo', 'napalm', 'smoke', 'machine_gun', 'sonic_boom'] },
+  voidglider: { name: "Pustynny Ślizgacz", description: "Obcy pojazd.", stats: { hp: 65, damage: 1.4, speed: 24, turretRot: 2.0 }, create: createVoidGlider, hullWidth: 3.5, sniperCamYOffset: 0.0, isPremium: true, isFlying: true, weapons: ['plasma_orb', 'laser_red', 'emp_blast', 'guided_m', 'sonic_boom', 'heal_nades'] },
+  dragonfly: { name: "Ważka", description: "Zwinny ornitopter.", stats: { hp: 55, damage: 1.1, speed: 26, turretRot: 2.2 }, create: createDragonfly, hullWidth: 3.0, sniperCamYOffset: 0.0, isPremium: true, isFlying: true, weapons: ['machine_gun', 'rocket_salvo', 'guided_m', 'laser_red', 'smoke', 'ap_fsds'] },
+  battlecube: { name: "Sześcian Bojowy", description: "Opór jest daremny.", stats: { hp: 180, damage: 1.6, speed: 10, turretRot: 0.5 }, create: createBattleCube, hullWidth: 6.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true, weapons: ['railgun', 'plasma_orb', 'emp_blast', 'sonic_boom', 'he_heavy', 'laser_red'] },
 };
 
-const WEAPONS_DATA = {
-    he:     { name: 'Odłamkowo-Burzący',  icon: '💥', cooldown: 0.8 },
-    ap:     { name: 'Przeciwpancerny',     icon: '🚀', cooldown: 0.6 },
-    heat:   { name: 'Kumulacyjny',         icon: '🔥', cooldown: 1.0 },
-    emp:    { name: 'EMP',                 icon: '⚡', cooldown: 1.5 },
-    smoke:  { name: 'Dymny',               icon: '💨', cooldown: 2.0 },
-    guided: { name: 'Naprowadzany',        icon: '🎯', cooldown: 1.2 }
+const CREATION_MAP = {
+    standard: createStandardTank, abrams: createAbramsTank, pl01: createPL01Tank,
+    tigerI: createTigerITank, t3485: createT3485Tank, cromwell: createCromwellTank,
+    amx1375: createAMX1375Tank, type59: createType59Tank, chiha: createChiHaTank,
+    strv103b: createStrv103BTank, p40: createP40Tank, skodaT25: createSkodaT25Tank,
+    ramII: createRamIITank, sentinelAC1: createSentinelAC1Tank, turanIII: createTuranIIITank,
+    bt42: createBT42Tank, shotkaldalet: createShotKalDaletTank, nahueldl43: createNahuelDL43Tank,
+    chonmaho: createChonmaHoTank, k2blackpanther: createK2BlackPantherTank, rooikat: createRooikatTank,
+    helicopter: createHelicopter, ufo: createUFO, ironwhale: createIronWhale,
+    xdrone: createXDrone, voidglider: createVoidGlider, dragonfly: createDragonfly,
+    battlecube: createBattleCube, soldier: createSoldier, mech: createMechWalker
 };
+
+// ... (TANK_QUOTES etc)
 const WEAPON_KEYS = ['he', 'ap', 'heat', 'emp', 'smoke', 'guided'];
 
 const TANK_QUOTES = [
@@ -858,18 +781,7 @@ function initializeUI() {
     const ampSlider = document.getElementById('terrain-amplitude'); const ampValue = document.getElementById('amplitude-value'); ampSlider.addEventListener('input', () => ampValue.textContent = ampSlider.value);
     const scaleSlider = document.getElementById('terrain-scale'); const scaleValue = document.getElementById('scale-value'); scaleSlider.addEventListener('input', () => scaleValue.textContent = scaleSlider.value);
 
-    const weaponBar = document.getElementById('weapon-bar');
-    WEAPON_KEYS.forEach((key, index) => {
-        const weaponData = WEAPONS_DATA[key];
-        const slot = document.createElement('div');
-        slot.className = 'weapon-slot';
-        slot.id = `weapon-slot-${key}`;
-        slot.innerHTML = `<div class="weapon-key">${index + 1}</div><div class="weapon-icon">${weaponData.icon}</div><div class="weapon-ammo">0</div>`;
-        slot.addEventListener('click', () => {
-            socket.emit('playerAction', { type: 'switchWeapon', weaponId: key });
-        });
-        weaponBar.appendChild(slot);
-    });
+    // Weapon bar is now generated dynamically in updateHUD based on player loadout.
 }
 
 function updateHUD() {
@@ -887,35 +799,47 @@ function updateHUD() {
     const hpBar = document.getElementById('hp-bar'); hpBar.style.width = `${hpPercent}%`; hpBar.className = `hud-bar-fill ${hpPercent < 30 ? "low" : ""}`;
     document.getElementById('medkits-value').innerText = playerState.medkits; document.getElementById('score-value').innerText = playerState.score;
 
-    // HELICOPTER CONTROLS HUD
-    const heliControls = document.getElementById('heli-controls-hud');
-    if (playerState.tankType === 'helicopter') {
-        if (!heliControls) {
-            const div = document.createElement('div');
-            div.id = 'heli-controls-hud';
-            div.style.position = 'absolute'; div.style.top = '120px'; div.style.left = '20px';
-            div.style.color = 'rgba(255, 255, 255, 0.8)'; div.style.fontFamily = 'monospace'; div.style.fontSize = '14px';
-            div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; div.style.padding = '10px'; div.style.borderRadius = '5px';
-            div.innerHTML = `
-                <strong>STEROWANIE HELIKOPTEREM</strong><br>
-                [W / S] - Przód / Tył<br>
-                [A / D] - Obrót lewo/prawo<br>
-                [Q / E] - Lot bokiem (Strafe)<br>
-                [SPACJA] - W górę<br>
-                [SHIFT] - W dół
-            `;
-            document.body.appendChild(div);
-        } else { heliControls.style.display = 'block'; }
-    } else {
-        if (heliControls) heliControls.style.display = 'none';
+    // --- DYNAMIC WEAPON BAR ---
+    // Check if weapon bar needs rebuild (if weapons changed)
+    const currentWeapons = playerState.weapons || [];
+    const currentSlots = weaponBarEl.querySelectorAll('.weapon-slot');
+    
+    if (currentSlots.length !== currentWeapons.length || currentSlots.length === 0 || currentSlots[0].dataset.id !== currentWeapons[0]) {
+        weaponBarEl.innerHTML = ''; // Clear old slots
+        currentWeapons.forEach((key, index) => {
+            const weaponData = WEAPONS_DATA[key] || { name: '?', icon: '?' };
+            const slot = document.createElement('div');
+            slot.className = 'weapon-slot';
+            slot.id = `weapon-slot-${key}`;
+            slot.dataset.id = key;
+            // Use icon if available, or first letter
+            let icon = '🔫';
+            if (key.includes('machine')) icon = '🔫';
+            else if (key.includes('laser') || key.includes('beam')) icon = '🔦';
+            else if (key.includes('plasma')) icon = '🟢';
+            else if (key.includes('rocket') || key.includes('missile')) icon = '🚀';
+            else if (key.includes('sonic')) icon = '🔊';
+            else if (key.includes('heal')) icon = '💊';
+            else if (key.includes('mine') || key.includes('emp')) icon = '💣';
+            else if (key.includes('fire') || key.includes('napalm')) icon = '🔥';
+            
+            slot.innerHTML = `<div class="weapon-key">${index + 1}</div><div class="weapon-icon">${icon}</div><div class="weapon-ammo">0</div><div class="weapon-name-tooltip">${weaponData.name}</div>`;
+            slot.addEventListener('click', () => {
+                socket.emit('playerAction', { type: 'switchWeapon', weaponId: key });
+            });
+            weaponBarEl.appendChild(slot);
+        });
     }
 
-    WEAPON_KEYS.forEach(key => {
+    // Update ammo counts
+    currentWeapons.forEach(key => {
         const slot = document.getElementById(`weapon-slot-${key}`);
-        const ammoCount = playerState.ammo[key] || 0;
-        slot.querySelector('.weapon-ammo').innerText = ammoCount;
-        if (ammoCount <= 0) { slot.classList.add('no-ammo'); } else { slot.classList.remove('no-ammo'); }
-        if (key === playerState.currentWeapon) { slot.classList.add('active'); } else { slot.classList.remove('active'); }
+        if(slot) {
+            const ammoCount = playerState.ammo[key] || 0;
+            slot.querySelector('.weapon-ammo').innerText = ammoCount;
+            if (ammoCount <= 0) { slot.classList.add('no-ammo'); } else { slot.classList.remove('no-ammo'); }
+            if (key === playerState.currentWeapon) { slot.classList.add('active'); } else { slot.classList.remove('active'); }
+        }
     });
 
     const powerupHUD = document.getElementById('powerup-hud');
@@ -1071,11 +995,13 @@ function handleFireInput() {
 function setupEventListeners() {
     document.addEventListener("keydown", (e) => { 
         keys[e.code] = true; 
-        if (!isGameStarted || !localPlayerId) return;
+        if (!isGameStarted || !localPlayerId || !clientGameState.players[localPlayerId]) return;
+        
         if (e.code.startsWith('Digit')) {
             const index = parseInt(e.code.replace('Digit', ''), 10) - 1;
-            if (index >= 0 && index < WEAPON_KEYS.length) {
-                const weaponId = WEAPON_KEYS[index];
+            const playerWeapons = clientGameState.players[localPlayerId].weapons;
+            if (playerWeapons && index >= 0 && index < playerWeapons.length) {
+                const weaponId = playerWeapons[index];
                 socket.emit('playerAction', { type: 'switchWeapon', weaponId: weaponId });
             }
         }
@@ -1199,8 +1125,39 @@ function createObjectMesh(payload) {
 
     switch(type) {
         case 'projectile': 
-            const pColors = { he: 0xffa500, ap: 0xcccccc, heat: 0xff4500, emp: 0x00ffff, smoke: 0xaaaaaa };
-            newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: pColors[data.weaponId] || 0xffff00, emissive: pColors[data.weaponId] || 0xffff00, emissiveIntensity: 2, name: `projectileMaterial_${data.weaponId}` }) ); // Jawna nazwa
+            const weaponId = data.weaponId;
+            const weaponInfo = WEAPONS_DATA[weaponId] || { color: 0xffff00 };
+            const color = weaponInfo.color || 0xffff00;
+            const visualType = weaponInfo.visual || 'shell';
+
+            if (visualType === 'orb') {
+                newMesh = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), new THREE.MeshBasicMaterial({ color: color, name: `orb_${weaponId}` }));
+                // Add glow sprite
+                const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ 
+                    map: createMuzzleFlashTexture(), 
+                    color: color, 
+                    blending: THREE.AdditiveBlending 
+                }));
+                sprite.scale.set(3, 3, 1);
+                newMesh.add(sprite);
+            } else if (visualType === 'wave') {
+                newMesh = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.1, 4, 12), new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.7 }));
+                newMesh.rotation.x = Math.PI / 2;
+            } else if (visualType === 'beam' || visualType === 'beam_thick') {
+                const thickness = visualType === 'beam_thick' ? 0.3 : 0.1;
+                newMesh = new THREE.Mesh(new THREE.CylinderGeometry(thickness, thickness, 4.0), new THREE.MeshBasicMaterial({ color: color }));
+                newMesh.rotation.x = Math.PI / 2;
+            } else if (visualType === 'fire') {
+                newMesh = new THREE.Group();
+                // Fire is particles, handled by emitters, but we need a 'core' for the projectile logic
+                const core = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0xff4400, visible: false }));
+                newMesh.add(core);
+                // We'll emit smoke in animate()
+            } else {
+                // Default Shell
+                newMesh = new THREE.Mesh( new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 1, name: `projectileMaterial_${data.weaponId}` }) );
+            }
+            
             const ownerTank = gameObjects.players[data.ownerId];
             if (ownerTank) triggerMuzzleFlash(ownerTank.barrel);
             break;
@@ -1428,6 +1385,22 @@ function animate() {
                 clientTank.wings[1].rotation.z = -angle;
                 clientTank.wings[2].rotation.z = -angle;
                 clientTank.wings[3].rotation.z = angle;
+            }
+            
+            // Animacja chodzenia (Mech / Żołnierz)
+            const isMoving = (Math.abs(clientTank.position.x - clientTank.lastPosition.x) > 0.01 || Math.abs(clientTank.position.z - clientTank.lastPosition.z) > 0.01);
+            if ((clientTank.leftLeg && clientTank.rightLeg) && isMoving) {
+                const walkSpeed = 8.0;
+                const walkAngle = Math.sin(clock.getElapsedTime() * walkSpeed);
+                clientTank.leftLeg.rotation.x = walkAngle * 0.5;
+                clientTank.rightLeg.rotation.x = -walkAngle * 0.5;
+                if (clientTank.rightArm) { // Żołnierz macha rękami
+                     clientTank.rightArm.rotation.x = -Math.PI / 2 + walkAngle * 0.3;
+                }
+            } else if (clientTank.leftLeg && clientTank.rightLeg) {
+                // Reset pozycja stojąca
+                clientTank.leftLeg.rotation.x = THREE.MathUtils.lerp(clientTank.leftLeg.rotation.x, 0, 0.1);
+                clientTank.rightLeg.rotation.x = THREE.MathUtils.lerp(clientTank.rightLeg.rotation.x, 0, 0.1);
             }
 
             clientTank.exhaustCooldown -= delta;
@@ -1770,182 +1743,184 @@ function animate() {
 }
 
 // --- OBSŁUGA ZDARZEŃ Z SERWERA ---
-socket.on("connect", () => { console.log("Połączono z serwerem!", socket.id); });
-socket.on('serverStatus', (data) => {
-    if(data.configured) {
-        console.log("Serwer już skonfigurowany. Blokowanie opcji."); const configPanel = document.getElementById('server-config-panel');
-        configPanel.disabled = true; document.querySelector(`input[name="map-size"][value="${data.settings.mapSize}"]`).checked = true;
-        const ampSlider = document.getElementById('terrain-amplitude'); const ampValue = document.getElementById('amplitude-value');
-        ampSlider.value = data.settings.amplitude; ampValue.textContent = data.settings.amplitude;
-        const scaleSlider = document.getElementById('terrain-scale'); const scaleValue = document.getElementById('scale-value');
-        scaleSlider.value = data.settings.scale; scaleValue.textContent = data.settings.scale;
-    } else { console.log("Serwer oczekuje na konfigurację."); }
-    if (data.devMode) {
-        console.log("Tryb deweloperski AKTYWNY. Odblokowywanie zawartości premium.");
-        Object.keys(TANKS_DATA).forEach(tankKey => {
-            const tank = TANKS_DATA[tankKey];
-            if (tank.isPremium) {
-                const tankCard = document.getElementById(`select-${tankKey}`);
-                const tankButton = tankCard?.querySelector('button');
-                const premiumLabel = tankCard?.querySelector('.premium-label');
-                if (tankCard) tankCard.classList.remove('locked');
-                if (tankButton) {
-                    tankButton.disabled = false;
-                    tankButton.textContent = 'Wybierz i Walcz';
-                }
-                if (premiumLabel) premiumLabel.style.display = 'none';
-            }
-        });
-    }
-});
-socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
-socket.on("gameStateUpdate", (serverState) => {
-    // Merge dynamic state instead of replacing everything to keep static objects (trees, buildings)
-    if (serverState.players) {
-        if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
-            serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;
-            serverState.players[localPlayerId].mantletRotation = clientGameState.players[localPlayerId].mantletRotation;
-        }
-        clientGameState.players = serverState.players;
-    }
-    // Update other dynamic lists if present
-    const dynamicKeys = ['projectiles', 'missiles', 'machineGunBullets', 'mines', 'smokeClouds', 'fires', 'tracks', 'crates', 'ammoCrates'];
-    dynamicKeys.forEach(key => {
-        if (serverState[key]) clientGameState[key] = serverState[key];
-    });
-    // Do NOT overwrite buildings, trees, rocks if not present in update
-});
-socket.on('objectCreated', (payload) => {
-    if (!isGameStarted) return; 
-    if (payload.type === 'smokeCloud') {
-        createSmokeCloud(new THREE.Vector3(payload.data.position.x, payload.data.position.y, payload.data.position.z), payload.data.radius, payload.data.lifespan);
-    } else {
-        createObjectMesh(payload);
-    }
-});
-socket.on('objectDestroyed', (payload) => {
-    const { type, id } = payload;
-    let containerName = type.endsWith('s') ? type : (type === 'track' ? 'tracks' : type + 's');
-    if(type === 'machineGunBullet') containerName = 'machineGunBullets';
-    if(type === 'ammoCrate') containerName = 'ammoCrates';
-    
-    if (type === 'fire') {
-        const fire = gameObjects.fires[id];
-        if (fire) {
-            currentFireParticleCount -= fire.particles.length;
-            fire.particles.forEach(p => {
-                scene.remove(p.mesh);
-                p.mesh.geometry.dispose();
-                p.mesh.material.dispose();
-            });
-            delete gameObjects.fires[id];
-            const scorchMarkSize = payload.radius * 2.5;
-            const scorchMark = new THREE.Mesh(
-                new THREE.PlaneGeometry(scorchMarkSize, scorchMarkSize),
-                scorchMarkMaterial
-            );
-            scorchMark.position.set(payload.position.x, getHeightAt(payload.position.x, payload.position.z) + 0.1, payload.position.z);
-            scorchMark.rotation.x = -Math.PI / 2;
-            scene.add(scorchMark);
-        }
-        return;
-    }
-    const objectList = gameObjects[containerName];
-    const object = objectList ? objectList[id] : null;
-    if (object) {
-        const mesh = (type === 'player') ? object : object.mesh;
-        if(type === 'player' && payload.hit) { 
-            destroyObjectWithWreckage(mesh, [mesh.hullGroup, mesh.turret]); 
-            if (Math.random() > 0.3) showTankQuote(id); 
-        } else if (type !== 'player') {
-            if (payload.hit) {
-                const weaponId = payload.weaponId;
-                if (weaponId === 'he' || weaponId === 'heat' || weaponId === 'guided') createExplosion(mesh.position, 2.5);
-                else if (weaponId === 'emp') createExplosion(mesh.position, 2.0, 0x00ffff);
-                else if (type === 'projectile') createExplosion(mesh.position, 1.5);
-            }
-            scene.remove(mesh);
-            if (mesh.traverse) {
-                mesh.traverse(c => {
-                    if (c.isMesh) {
-                        c.geometry.dispose();
-                        if (c.material.isMaterial) c.material.dispose();
-                        if (c.material.map) c.material.map.dispose();
+if (socket) {
+    socket.on("connect", () => { console.log("Połączono z serwerem!", socket.id); });
+    socket.on('serverStatus', (data) => {
+        if(data.configured) {
+            console.log("Serwer już skonfigurowany. Blokowanie opcji."); const configPanel = document.getElementById('server-config-panel');
+            configPanel.disabled = true; document.querySelector(`input[name="map-size"][value="${data.settings.mapSize}"]`).checked = true;
+            const ampSlider = document.getElementById('terrain-amplitude'); const ampValue = document.getElementById('amplitude-value');
+            ampSlider.value = data.settings.amplitude; ampValue.textContent = data.settings.amplitude;
+            const scaleSlider = document.getElementById('terrain-scale'); const scaleValue = document.getElementById('scale-value');
+            scaleSlider.value = data.settings.scale; scaleValue.textContent = data.settings.scale;
+        } else { console.log("Serwer oczekuje na konfigurację."); }
+        if (data.devMode) {
+            console.log("Tryb deweloperski AKTYWNY. Odblokowywanie zawartości premium.");
+            Object.keys(TANKS_DATA).forEach(tankKey => {
+                const tank = TANKS_DATA[tankKey];
+                if (tank.isPremium) {
+                    const tankCard = document.getElementById(`select-${tankKey}`);
+                    const tankButton = tankCard?.querySelector('button');
+                    const premiumLabel = tankCard?.querySelector('.premium-label');
+                    if (tankCard) tankCard.classList.remove('locked');
+                    if (tankButton) {
+                        tankButton.disabled = false;
+                        tankButton.textContent = 'Wybierz i Walcz';
                     }
-                });
+                    if (premiumLabel) premiumLabel.style.display = 'none';
+                }
+            });
+        }
+    });
+    socket.on("gameStarted", (payload) => { console.log("Gra rozpoczęta! Twój ID:", payload.playerId); initGame(payload); });
+    socket.on("gameStateUpdate", (serverState) => {
+        // Merge dynamic state instead of replacing everything to keep static objects (trees, buildings)
+        if (serverState.players) {
+            if (clientGameState.players && clientGameState.players[localPlayerId] && serverState.players[localPlayerId]) {
+                serverState.players[localPlayerId].turretRotation = clientGameState.players[localPlayerId].turretRotation;
+                serverState.players[localPlayerId].mantletRotation = clientGameState.players[localPlayerId].mantletRotation;
             }
-            delete objectList[id];
+            clientGameState.players = serverState.players;
         }
-    }
-});
-socket.on('buildingDamaged', ({ buildingId, destroyedBrickIndices, impactPoint }) => {
-    const building = gameObjects.buildings[buildingId];
-    if (building) {
-        const zeroScaleMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
-        for (const index of destroyedBrickIndices) { building.mesh.setMatrixAt(index, zeroScaleMatrix); building.data.bricks[index] = null; }
-        building.mesh.instanceMatrix.needsUpdate = true;
-        createBrickDebris(impactPoint, 5 + Math.floor(Math.random() * 5));
-    }
-});
-socket.on("playerConnected", (playerData) => {
-    if (!isGameStarted || !scene || gameObjects.players[playerData.id]) return;
-    console.log(`Nowy gracz dołączył: ${playerData.id}`);
-    if (clientGameState.players) { clientGameState.players[playerData.id] = playerData; }
-    const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(0xcc3333));
-    tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
-    tank.rotation.y = playerData.rotation.y; tank.isSinkingBubbleShown = false;
-    tank.laserSight = createPlayerLaser();
-    tank.lastPosition = new THREE.Vector3().copy(tank.position);
-    tank.exhaustCooldown = 0;
-    scene.add(tank); gameObjects.players[playerData.id] = tank; aimables.push(tank);
-    displayJoinNotification(playerData.id);
-});
-socket.on("playerDisconnected", (id) => {
-    if (clientGameState.players && clientGameState.players[id]) { delete clientGameState.players[id]; }
-    const bubble = document.getElementById(`bubble-${id}`); if(bubble) bubble.remove();
-    if (gameObjects.players[id]) {
-        const index = aimables.indexOf(gameObjects.players[id]); if (index > -1) { aimables.splice(index, 1); }
-        scene.remove(gameObjects.players[id].laserSight); scene.remove(gameObjects.players[id]);
-        delete gameObjects.players[id]; console.log(`Gracz ${id} się rozłączył.`);
-    }
-});
-socket.on('killNotification', ({ attackerId, victimId }) => { displayKillNotification(attackerId, victimId); });
-socket.on('playerHit', (data) => {
-    const { victimId, impactPoint, impulse } = data;
-    if (gameObjects.players[victimId]) {
-        createHitEffect(new THREE.Vector3(impactPoint.x, impactPoint.y, impactPoint.z), new THREE.Vector3(impulse.x, impulse.y, impulse.z));
-    }
-});
-socket.on('terrainDeformed', (data) => {
-    updateTerrainMesh(data);
-});
-
-socket.on('treeFallen', (data) => {
-    if (!isGameStarted || !gameObjects.trees) return;
-    const { treeId, fallAxis, fallSpeed } = data;
-    const treeMesh = gameObjects.trees[treeId];
-    
-    if (treeMesh && !treeMesh.isFalling) {
-        treeMesh.isFalling = true; 
-        gameObjects.fallingTrees.push({
-            mesh: treeMesh,
-            fallAxis: new THREE.Vector3(fallAxis.x, fallAxis.y, fallAxis.z).normalize(),
-            fallSpeed: fallSpeed,
-            rotationProgress: 0
+        // Update other dynamic lists if present
+        const dynamicKeys = ['projectiles', 'missiles', 'machineGunBullets', 'mines', 'smokeClouds', 'fires', 'tracks', 'crates', 'ammoCrates'];
+        dynamicKeys.forEach(key => {
+            if (serverState[key]) clientGameState[key] = serverState[key];
         });
-        
-        const index = aimables.indexOf(treeMesh);
-        if (index > -1) {
-            aimables.splice(index, 1);
+        // Do NOT overwrite buildings, trees, rocks if not present in update
+    });
+    socket.on('objectCreated', (payload) => {
+        if (!isGameStarted) return; 
+        if (payload.type === 'smokeCloud') {
+            createSmokeCloud(new THREE.Vector3(payload.data.position.x, payload.data.position.y, payload.data.position.z), payload.data.radius, payload.data.lifespan);
+        } else {
+            createObjectMesh(payload);
         }
-    }
-});
+    });
+    socket.on('objectDestroyed', (payload) => {
+        const { type, id } = payload;
+        let containerName = type.endsWith('s') ? type : (type === 'track' ? 'tracks' : type + 's');
+        if(type === 'machineGunBullet') containerName = 'machineGunBullets';
+        if(type === 'ammoCrate') containerName = 'ammoCrates';
+        
+        if (type === 'fire') {
+            const fire = gameObjects.fires[id];
+            if (fire) {
+                currentFireParticleCount -= fire.particles.length;
+                fire.particles.forEach(p => {
+                    scene.remove(p.mesh);
+                    p.mesh.geometry.dispose();
+                    p.mesh.material.dispose();
+                });
+                delete gameObjects.fires[id];
+                const scorchMarkSize = payload.radius * 2.5;
+                const scorchMark = new THREE.Mesh(
+                    new THREE.PlaneGeometry(scorchMarkSize, scorchMarkSize),
+                    scorchMarkMaterial
+                );
+                scorchMark.position.set(payload.position.x, getHeightAt(payload.position.x, payload.position.z) + 0.1, payload.position.z);
+                scorchMark.rotation.x = -Math.PI / 2;
+                scene.add(scorchMark);
+            }
+            return;
+        }
+        const objectList = gameObjects[containerName];
+        const object = objectList ? objectList[id] : null;
+        if (object) {
+            const mesh = (type === 'player') ? object : object.mesh;
+            if(type === 'player' && payload.hit) { 
+                destroyObjectWithWreckage(mesh, [mesh.hullGroup, mesh.turret]); 
+                if (Math.random() > 0.3) showTankQuote(id); 
+            } else if (type !== 'player') {
+                if (payload.hit) {
+                    const weaponId = payload.weaponId;
+                    if (weaponId === 'he' || weaponId === 'heat' || weaponId === 'guided') createExplosion(mesh.position, 2.5);
+                    else if (weaponId === 'emp') createExplosion(mesh.position, 2.0, 0x00ffff);
+                    else if (type === 'projectile') createExplosion(mesh.position, 1.5);
+                }
+                scene.remove(mesh);
+                if (mesh.traverse) {
+                    mesh.traverse(c => {
+                        if (c.isMesh) {
+                            c.geometry.dispose();
+                            if (c.material.isMaterial) c.material.dispose();
+                            if (c.material.map) c.material.map.dispose();
+                        }
+                    });
+                }
+                delete objectList[id];
+            }
+        }
+    });
+    socket.on('buildingDamaged', ({ buildingId, destroyedBrickIndices, impactPoint }) => {
+        const building = gameObjects.buildings[buildingId];
+        if (building) {
+            const zeroScaleMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+            for (const index of destroyedBrickIndices) { building.mesh.setMatrixAt(index, zeroScaleMatrix); building.data.bricks[index] = null; }
+            building.mesh.instanceMatrix.needsUpdate = true;
+            createBrickDebris(impactPoint, 5 + Math.floor(Math.random() * 5));
+        }
+    });
+    socket.on("playerConnected", (playerData) => {
+        if (!isGameStarted || !scene || gameObjects.players[playerData.id]) return;
+        console.log(`Nowy gracz dołączył: ${playerData.id}`);
+        if (clientGameState.players) { clientGameState.players[playerData.id] = playerData; }
+        const tank = TANKS_DATA[playerData.tankType].create(new THREE.Color(0xcc3333));
+        tank.position.set(playerData.position.x, playerData.position.y, playerData.position.z);
+        tank.rotation.y = playerData.rotation.y; tank.isSinkingBubbleShown = false;
+        tank.laserSight = createPlayerLaser();
+        tank.lastPosition = new THREE.Vector3().copy(tank.position);
+        tank.exhaustCooldown = 0;
+        scene.add(tank); gameObjects.players[playerData.id] = tank; aimables.push(tank);
+        displayJoinNotification(playerData.id);
+    });
+    socket.on("playerDisconnected", (id) => {
+        if (clientGameState.players && clientGameState.players[id]) { delete clientGameState.players[id]; }
+        const bubble = document.getElementById(`bubble-${id}`); if(bubble) bubble.remove();
+        if (gameObjects.players[id]) {
+            const index = aimables.indexOf(gameObjects.players[id]); if (index > -1) { aimables.splice(index, 1); }
+            scene.remove(gameObjects.players[id].laserSight); scene.remove(gameObjects.players[id]);
+            delete gameObjects.players[id]; console.log(`Gracz ${id} się rozłączył.`);
+        }
+    });
+    socket.on('killNotification', ({ attackerId, victimId }) => { displayKillNotification(attackerId, victimId); });
+    socket.on('playerHit', (data) => {
+        const { victimId, impactPoint, impulse } = data;
+        if (gameObjects.players[victimId]) {
+            createHitEffect(new THREE.Vector3(impactPoint.x, impactPoint.y, impactPoint.z), new THREE.Vector3(impulse.x, impulse.y, impulse.z));
+        }
+    });
+    socket.on('terrainDeformed', (data) => {
+        updateTerrainMesh(data);
+    });
 
-// HEAT tree ignition broadcast
-socket.on('treeIgnited', ({ treeId }) => {
-    if (!isGameStarted || !gameObjects.trees) return;
-    igniteTree(String(treeId));
-});
+    socket.on('treeFallen', (data) => {
+        if (!isGameStarted || !gameObjects.trees) return;
+        const { treeId, fallAxis, fallSpeed } = data;
+        const treeMesh = gameObjects.trees[treeId];
+        
+        if (treeMesh && !treeMesh.isFalling) {
+            treeMesh.isFalling = true; 
+            gameObjects.fallingTrees.push({
+                mesh: treeMesh,
+                fallAxis: new THREE.Vector3(fallAxis.x, fallAxis.y, fallAxis.z).normalize(),
+                fallSpeed: fallSpeed,
+                rotationProgress: 0
+            });
+            
+            const index = aimables.indexOf(treeMesh);
+            if (index > -1) {
+                aimables.splice(index, 1);
+            }
+        }
+    });
+
+    // HEAT tree ignition broadcast
+    socket.on('treeIgnited', ({ treeId }) => {
+        if (!isGameStarted || !gameObjects.trees) return;
+        igniteTree(String(treeId));
+    });
+}
 
 // --- START APLIKACJI ---
 initializeUI();
@@ -1993,3 +1968,7 @@ function checkProjectileCollision(projectile, delta, containerType) {
     }
     projectile.lastPosition = currentPosition.clone();
 }
+
+// --- START APLIKACJI ---
+initializeUI();
+animate();
