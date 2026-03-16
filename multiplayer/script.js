@@ -8,7 +8,8 @@ import {
     createSkodaT25Tank, createRamIITank, createSentinelAC1Tank, createTuranIIITank,
     createBT42Tank, createShotKalDaletTank, createNahuelDL43Tank, createChonmaHoTank,
     createK2BlackPantherTank, createRooikatTank, createHelicopter,
-    createUFO, createIronWhale, createXDrone, createVoidGlider, createDragonfly, createBattleCube
+    createUFO, createIronWhale, createXDrone, createVoidGlider, createDragonfly, createBattleCube,
+    createWalkerMech, createFutureHoverTank
 } from './tankModels.js'; 
 
 let scene, renderer, clock, camera;
@@ -259,6 +260,18 @@ const TANKS_DATA = {
     description: "Latający monolit. Ignoruje prawa aerodynamiki. Przerażająco wytrzymały i wyposażony w potężne działo energetyczne.",
     stats: { hp: 180, damage: 1.6, speed: 10, turretRot: 0.5 },
     create: createBattleCube, hullWidth: 6.0, sniperCamYOffset: -1.0, isPremium: true, isFlying: true
+  },
+  titan: {
+    name: "Tytan (Mech)",
+    description: "Dwunożna maszyna krocząca. Powolny, ale potężnie uzbrojony. Wyposażony w podwójne działka plazmowe.",
+    stats: { hp: 160, damage: 1.4, speed: 9, turretRot: 1.2 },
+    create: createWalkerMech, hullWidth: 4.0, sniperCamYOffset: 3.5, isPremium: true
+  },
+  wraith: {
+    name: "Wraith (Poduszkowiec)",
+    description: "Futurystyczny czołg antygrawitacyjny. Płynie nad terenem z dużą prędkością. Uzbrojony w działo railgun.",
+    stats: { hp: 90, damage: 1.5, speed: 24, turretRot: 2.5 },
+    create: createFutureHoverTank, hullWidth: 5.0, sniperCamYOffset: 1.5, isPremium: true
   },
 };
 

@@ -2024,3 +2024,150 @@ export function createBattleCube(color) {
 
     return cube;
 }
+
+/**
+ * Tworzy Mecha Kroczącego "Titan".
+ */
+export function createWalkerMech(color) {
+    const mech = new THREE.Group();
+    const hullGroup = new THREE.Group(); // Korpus
+    const mat = LAMBERT_MATERIAL(color, 'mechMat');
+    const jointMat = LAMBERT_MATERIAL(0x333333, 'mechJoint');
+
+    // Nogi (statyczne dla modelu bazowego)
+    const legGeom = new THREE.BoxGeometry(1.0, 3.5, 1.0);
+    const footGeom = new THREE.BoxGeometry(1.5, 0.5, 2.0);
+
+    const leftLeg = new THREE.Group();
+    const lUpper = new THREE.Mesh(legGeom, mat); lUpper.position.y = 1.75;
+    const lFoot = new THREE.Mesh(footGeom, jointMat); lFoot.position.y = 0.25; lFoot.position.z = 0.5;
+    leftLeg.add(lUpper, lFoot);
+    leftLeg.position.set(-1.5, 0, 0);
+
+    const rightLeg = new THREE.Group();
+    const rUpper = new THREE.Mesh(legGeom, mat); rUpper.position.y = 1.75;
+    const rFoot = new THREE.Mesh(footGeom, jointMat); rFoot.position.y = 0.25; rFoot.position.z = 0.5;
+    rightLeg.add(rUpper, rFoot);
+    rightLeg.position.set(1.5, 0, 0);
+
+    hullGroup.add(leftLeg, rightLeg);
+
+    // Miednica
+    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.0, 2.5), jointMat);
+    pelvis.position.y = 3.5;
+    hullGroup.add(pelvis);
+
+    mech.add(hullGroup); // Nogi są częścią "hull"
+
+    // Tułów (jako wieża - będzie się obracać)
+    const turretGroup = new THREE.Group();
+    const torsoGeom = new THREE.BoxGeometry(3.5, 3.0, 3.5);
+    const torso = new THREE.Mesh(torsoGeom, mat);
+    torso.position.y = 1.5; // Nad miednicą
+    turretGroup.add(torso);
+
+    // Kokpit
+    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.5, 1.0), LAMBERT_MATERIAL(0x00aaff, 'mechGlass'));
+    cockpit.position.set(0, 1.5, 1.8);
+    torso.add(cockpit);
+
+    // Ramiona z bronią
+    const armGeom = new THREE.BoxGeometry(1.0, 1.0, 4.0);
+    const leftArm = new THREE.Mesh(armGeom, mat);
+    leftArm.position.set(-2.5, 1.5, 1.0);
+    const rightArm = new THREE.Mesh(armGeom, mat);
+    rightArm.position.set(2.5, 1.5, 1.0);
+    turretGroup.add(leftArm, rightArm);
+
+    // Lufy (na końcach ramion)
+    const barrelGeom = new THREE.CylinderGeometry(0.3, 0.3, 2.0);
+    const leftBarrel = new THREE.Mesh(barrelGeom, jointMat);
+    leftBarrel.rotation.x = Math.PI / 2; leftBarrel.position.set(0, 0, 2.5);
+    leftArm.add(leftBarrel);
+
+    const rightBarrel = new THREE.Mesh(barrelGeom, jointMat);
+    rightBarrel.rotation.x = Math.PI / 2; rightBarrel.position.set(0, 0, 2.5);
+    rightArm.add(rightBarrel);
+
+    turretGroup.position.y = 4.0; // Na szczycie nóg
+    hullGroup.add(turretGroup);
+
+    // Punkt wylotu (bierzemy prawą rękę jako główną)
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 1.0, 0);
+    rightBarrel.add(barrelTip);
+
+    mech.hullGroup = hullGroup;
+    mech.turret = turretGroup;
+    mech.mantlet = new THREE.Group();
+    mech.barrel = rightBarrel; 
+    mech.barrelTip = barrelTip;
+    mech.exhaustPoint = new THREE.Object3D(); // Plecy
+
+    return mech;
+}
+
+/**
+ * Tworzy Futurystyczny Czołg Poduszkowiec "Wraith".
+ */
+export function createFutureHoverTank(color) {
+    const tank = new THREE.Group();
+    const hullGroup = new THREE.Group();
+    const turretGroup = new THREE.Group();
+    const mat = LAMBERT_MATERIAL(color, 'wraithMat');
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+
+    // Kadłub - płaski, opływowy
+    const hullGeom = new THREE.CylinderGeometry(3.5, 4.5, 1.5, 6);
+    const hull = new THREE.Mesh(hullGeom, mat);
+    hull.position.y = 1.0;
+    hullGroup.add(hull);
+
+    // Silniki antygrawitacyjne
+    const hoverPad = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.2, 16), glowMat);
+    hoverPad.position.set(2.5, 0.2, 2.5);
+    hullGroup.add(hoverPad);
+    const hp2 = hoverPad.clone(); hp2.position.set(-2.5, 0.2, 2.5); hullGroup.add(hp2);
+    const hp3 = hoverPad.clone(); hp3.position.set(2.5, 0.2, -2.5); hullGroup.add(hp3);
+    const hp4 = hoverPad.clone(); hp4.position.set(-2.5, 0.2, -2.5); hullGroup.add(hp4);
+
+    tank.add(hullGroup);
+
+    // Wieża - lewitująca kula
+    const sphereGeom = new THREE.SphereGeometry(1.8, 32, 32);
+    const sphere = new THREE.Mesh(sphereGeom, mat);
+    turretGroup.add(sphere);
+
+    // Pierścienie wokół wieży
+    const ringGeom = new THREE.TorusGeometry(2.2, 0.1, 8, 32);
+    const ring1 = new THREE.Mesh(ringGeom, glowMat);
+    ring1.rotation.x = Math.PI / 2;
+    turretGroup.add(ring1);
+
+    // Działo energetyczne (railgun)
+    const railGeom = new THREE.BoxGeometry(0.8, 0.5, 6.0);
+    const rail = new THREE.Mesh(railGeom, LAMBERT_MATERIAL(0x222222, 'wraithRail'));
+    rail.position.z = 2.0;
+    turretGroup.add(rail);
+
+    // Rdzeń działa
+    const core = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 5.0), glowMat);
+    core.position.y = 0;
+    rail.add(core);
+
+    turretGroup.position.y = 2.5;
+    hullGroup.add(turretGroup);
+
+    const barrelTip = new THREE.Object3D();
+    barrelTip.position.set(0, 0, 2.5);
+    rail.add(barrelTip);
+
+    tank.hullGroup = hullGroup;
+    tank.turret = turretGroup;
+    tank.mantlet = new THREE.Group();
+    tank.barrel = rail;
+    tank.barrelTip = barrelTip;
+    tank.exhaustPoint = hull; 
+
+    return tank;
+}
